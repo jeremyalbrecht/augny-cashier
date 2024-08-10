@@ -6,16 +6,16 @@ import { resolve } from 'path';
 interface GetSheetDataParams {
     spreadsheetId: string;
     range: string;
-    credentialsPath: string;
+    credentialsRaw: string;
 }
 
 // Utility function to fetch data from Google Sheets
 export async function getSheetData({
                                        spreadsheetId,
                                        range,
-                                       credentialsPath,
+                                       credentialsRaw,
                                    }: GetSheetDataParams): Promise<Record<string, any>[]> {
-    const credentials = JSON.parse(readFileSync(resolve(credentialsPath), 'utf8'));
+    const credentials = JSON.parse(atob(credentialsRaw));
 
     const auth = new google.auth.GoogleAuth({
         credentials,

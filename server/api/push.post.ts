@@ -3,8 +3,8 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
 export default defineEventHandler(async (event) => {
-    const credentialsPath = resolve(process.env.GOOGLE_CREDENTIALS_PATH || '');
-    const credentials = JSON.parse(readFileSync(credentialsPath, 'utf8'));
+    const { sa } = useRuntimeConfig(event)
+    const credentials = JSON.parse(atob(sa));
 
     const auth = new google.auth.GoogleAuth({
         credentials,

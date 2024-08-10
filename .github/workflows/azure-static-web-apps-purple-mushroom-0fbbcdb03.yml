@@ -15,18 +15,12 @@ jobs:
         with:
           submodules: true
           lfs: false
-      - name: Get Service Account credentials
-        uses: mobiledevops/secret-to-file-action@v1
-        with:
-          base64-encoded-secret: ${{ secrets.SHEETS-API }}
-          filename: "sheets-api.json"
-          is-executable: false
-          working-directory: "."
       - name: Set environment variable
         run: |
           touch .env
           echo GOOGLE_SHEET_ID="${{ secrets.SHEETS_ID }}" >> .env
           echo GOOGLE_CREDENTIALS_PATH="sheets-api.json" >> .env
+          echo NUXT_SA="${{ secrets.SHEETS-API }}" >> .env
       - name: Build And Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
