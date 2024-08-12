@@ -18,4 +18,14 @@ export default defineNuxtConfig({
             autoprefixer: {},
         },
     },
+    modules: ["@kgierke/nuxt-basic-auth"],
+    basicAuth: {
+        enabled: true,
+        users: [
+            {
+                username: "augny",
+                password: process.env.PASSWORD || 'augny',
+            },
+        ],
+    }
 })

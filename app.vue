@@ -1,7 +1,15 @@
 <script setup lang="ts">
-const { data: players } = await useFetch('/api/players');
-const { data: comite } = await useFetch('/api/comitee');
-const { data: items } = await useFetch('/api/prices');
+const auth = useRequestHeaders()['authorization']
+
+const { data: players } = await useFetch('/api/players', {
+  headers: auth
+});
+const { data: comite } = await useFetch('/api/comitee', {
+  headers: auth
+});
+const { data: items } = await useFetch('/api/prices', {
+  headers: auth
+});
 
 
 const randomPlayer = players.value['data'][Math.floor(Math.random() * players.value['data'].length)]
@@ -172,6 +180,7 @@ const submit = async () => {
             </div>
           </div>
           <p>Dette enregistrée</p>
+          <div v-on:click="reloadNuxtApp()" class="mt-5 cursor-pointer text-white bg-gradient-to-br from-purple-600 to-blue-500 hover:bg-gradient-to-bl focus:ring-4 focus:outline-none focus:ring-blue-300 dark:focus:ring-blue-800 font-medium rounded-lg text-sm px-5 py-2.5 text-center me-2 mb-2">Recommencer</div>
         </div>
       </div>
     </template>

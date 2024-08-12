@@ -15,6 +15,7 @@
     "vue": "latest"
   },
   "devDependencies": {
+    "@kgierke/nuxt-basic-auth": "^1.6.0",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.41",
     "tailwindcss": "^3.4.9",
