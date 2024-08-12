@@ -18,6 +18,8 @@ jobs:
       - name: Set environment variable
         run: |
           touch .env
+          echo GOOGLE_SHEET_ID="${{ secrets.SHEETS_ID }}" > .env
+          echo GOOGLE_CREDENTIALS_PATH="sheets-api.json" >> .env
           echo NUXT_SA="${{ secrets.SHEETS_API }}" >> .env
           echo PASSWORD="${{ secrets.PASSWORD }}" >> .env
       - name: Build And Deploy
