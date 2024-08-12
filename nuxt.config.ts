@@ -10,6 +10,7 @@ export default defineNuxtConfig({
     },
     css: ['~/assets/css/main.css'],
     runtimeConfig: {
+        basicAuth: '',
         sa: '',
     },
     postcss: {
@@ -18,14 +19,4 @@ export default defineNuxtConfig({
             autoprefixer: {},
         },
     },
-    modules: ["@kgierke/nuxt-basic-auth"],
-    basicAuth: {
-        enabled: true,
-        users: [
-            {
-                username: "augny",
-                password: process.env.PASSWORD || 'augny',
-            },
-        ],
-    }
 })
