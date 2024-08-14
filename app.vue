@@ -1,5 +1,18 @@
 <script setup lang="ts">
-const token = useCookie('token')
+import {createError} from "h3";
+
+const route = useRoute()
+const routeToken = route.query.token
+const cookieToken = useCookie('token')
+let token = ''
+
+if (!cookieToken.value && !routeToken) {
+  throw createError({ statusCode: 401, statusMessage: 'Not authorized' });
+} else if (cookieToken.value) {
+  token = cookieToken.value
+} else {
+  token = routeToken
+}
 
 const { data: players } = await useFetch('/api/players', {
   headers: {'X-Token': token}

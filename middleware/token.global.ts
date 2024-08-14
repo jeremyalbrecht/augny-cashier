@@ -15,11 +15,10 @@ export default defineNuxtRouteMiddleware((to, from) => {
         const storedToken = token.value
         if (storedToken) {
             console.log(`Token not given but present in localStorage: ${storedToken}`)
-            // Token exists in localStorage, continue to the next middleware or the actual request handler
             return;
         } else {
             // Token not found in request or localStorage, return a 401 response
-            abortNavigation("401")
+            return abortNavigation("401")
         }
     }
 });
