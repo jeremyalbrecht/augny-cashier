@@ -63,7 +63,7 @@ const Euro = new Intl.NumberFormat('fr-FR', {
 const submit = async () => {
   loading.value = true
   for(let i =0; i < quantity.value; i++) {
-    const {data: response, status} = await useFetch('/api/push', {
+    const {data: response, status: s} = await useFetch('/api/push', {
       method: 'POST',
       headers: {
         "X-Token": token
@@ -72,9 +72,9 @@ const submit = async () => {
         data: [player.value, item.value['Item'], item.value['Prix'], new Date().toJSON().slice(0,10).replace(/-/g,'/')],
       },
     });
-  }
-  if (status !== 'success') {
-    error.value = true
+    if (s.value !== 'success') {
+      error.value = true
+    }
   }
   completed.value = true
   loading.value = false
