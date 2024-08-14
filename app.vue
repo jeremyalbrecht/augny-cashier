@@ -1,14 +1,18 @@
 <script setup lang="ts">
-const auth = useRequestHeaders()['authorization']
+const token = useCookie('token')
 
 const { data: players } = await useFetch('/api/players', {
-  headers: auth
+  headers: {'X-Token': token}
 });
 const { data: comite } = await useFetch('/api/comitee', {
-  headers: auth
+  headers: {
+    "X-Token": token
+  }
 });
 const { data: items } = await useFetch('/api/prices', {
-  headers: auth
+  headers: {
+    "X-Token": token
+  }
 });
 
 
@@ -23,6 +27,7 @@ const quantity = ref(1)
 
 const completed = ref(false)
 const loading = ref(false)
+const error = ref(false)
 
 const filteredPlayers = computed(() => {
   if (player.value.length < 3) {
@@ -45,12 +50,18 @@ const Euro = new Intl.NumberFormat('fr-FR', {
 const submit = async () => {
   loading.value = true
   for(let i =0; i < quantity.value; i++) {
-    const {data: response, status: loading} = await useFetch('/api/push', {
+    const {data: response, status} = await useFetch('/api/push', {
       method: 'POST',
+      headers: {
+        "X-Token": token
+      },
       body: {
         data: [player.value, item.value['Item'], item.value['Prix'], new Date().toJSON().slice(0,10).replace(/-/g,'/')],
       },
     });
+  }
+  if (status !== 'success') {
+    error.value = true
   }
   completed.value = true
   loading.value = false
@@ -168,7 +179,7 @@ const submit = async () => {
 
     </form>
 
-    <template v-if="completed && !loading">
+    <template v-if="completed && !loading && !error">
       <div class="grid h-screen place-items-center">
         <div>
           <div class="success-checkmark ">
@@ -180,6 +191,15 @@ const submit = async () => {
             </div>
           </div>
           <p>Dette enregistrée</p>
+          <div v-on:click="reloadNuxtApp()" class="mt-5 cursor-pointer text-white bg-gradient-to-br from-purple-600 to-blue-500 hover:bg-gradient-to-bl focus:ring-4 focus:outline-none focus:ring-blue-300 dark:focus:ring-blue-800 font-medium rounded-lg text-sm px-5 py-2.5 text-center me-2 mb-2">Recommencer</div>
+        </div>
+      </div>
+    </template>
+
+    <template v-if="error">
+      <div class="grid h-screen place-items-center">
+        <div>
+          <p>Erreur lors de l'enregistrement</p>
           <div v-on:click="reloadNuxtApp()" class="mt-5 cursor-pointer text-white bg-gradient-to-br from-purple-600 to-blue-500 hover:bg-gradient-to-bl focus:ring-4 focus:outline-none focus:ring-blue-300 dark:focus:ring-blue-800 font-medium rounded-lg text-sm px-5 py-2.5 text-center me-2 mb-2">Recommencer</div>
         </div>
       </div>
