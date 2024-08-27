@@ -5,6 +5,7 @@ export default defineNuxtConfig({
     experimental: {
         watcher: "chokidar",
     },
+    ssr: false,
     app: {
       head: {
           title: 'Augny Badminton Cashier - Enregistrement des dettes',
