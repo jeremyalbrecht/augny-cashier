@@ -4,6 +4,7 @@ export default defineNuxtConfig({
     devtools: {enabled: true},
     experimental: {
         watcher: "chokidar",
+        viteEnvironmentApi: true,
     },
     ssr: false,
     app: {

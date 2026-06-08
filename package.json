@@ -7,14 +7,14 @@
   },
   "scripts": {
     "build": "nuxt build",
-    "dev": "nuxt dev",
+    "dev": "TMPDIR=/tmp nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare"
   },
   "dependencies": {
     "googleapis": "^140.0.1",
-    "nuxt": "^3.13.0",
+    "nuxt": "^4.4.7",
     "vue": "latest"
   },
   "devDependencies": {
