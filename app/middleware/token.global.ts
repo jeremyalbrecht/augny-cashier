@@ -3,6 +3,11 @@
 const OAUTH_ROUTE_PREFIXES = ['/dettes', '/auth/'];
 
 export default defineNuxtRouteMiddleware((to, from) => {
+    // Skip during SSR / static prerender. Without this, building the index
+    // page would call abortNavigation (no cookie at build time) and the
+    // generated output would be missing index.html — host serves 404 at /.
+    if (import.meta.server) return;
+
     if (OAUTH_ROUTE_PREFIXES.some((p) => to.path.startsWith(p))) {
         return;
     }
