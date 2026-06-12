@@ -1,4 +1,4 @@
-import { getSheetData } from '~/server/utils/fetch';
+import { getSheetData } from '#server/utils/fetch';
 
 export default defineEventHandler(async (event) => {
     const spreadsheetId = process.env.GOOGLE_SHEET_ID || '';

@@ -2,8 +2,10 @@
 export default defineNuxtConfig({
     compatibilityDate: '2024-04-03',
     devtools: {enabled: true},
+    modules: ['nuxt-auth-utils'],
     experimental: {
         watcher: "chokidar",
+        viteEnvironmentApi: true,
     },
     ssr: false,
     app: {
@@ -17,6 +19,10 @@ export default defineNuxtConfig({
     runtimeConfig: {
         token: '',
         sa: '',
+        session: { password: '' },
+        oauth: { google: { clientId: '', clientSecret: '' } },
+        // SMTP (Gmail app password). Env vars: NUXT_SMTP_USER, NUXT_SMTP_PASSWORD.
+        smtp: { user: '', password: '' },
     },
     postcss: {
         plugins: {

@@ -1,4 +1,11 @@
+// Routes that use Google OAuth instead of the shared X-Token (cashier secret).
+// Listed by prefix so future admin sub-pages are also exempt without edits.
+const OAUTH_ROUTE_PREFIXES = ['/dettes', '/auth/'];
+
 export default defineNuxtRouteMiddleware((to, from) => {
+    if (OAUTH_ROUTE_PREFIXES.some((p) => to.path.startsWith(p))) {
+        return;
+    }
     const token = useCookie('token', {maxAge: 60 * 60 * 24 * 365});
 
 
