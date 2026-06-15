@@ -145,7 +145,13 @@ export default defineEventHandler(async (event) => {
         html,
       );
       results.push({ name, email: player.email, status: "sent" });
-      envoisToAppend.push({ name: player.name, amount: player.total });
+      // Record ONLY the new-period charges in Envois — prior outstanding is
+      // already represented by previous Envois rows. Writing the full Solde
+      // here would double-count past invoices in `outstandingFromInvoices`.
+      const newCharges = player.purchasesTotal + player.tournamentsTotal;
+      if (newCharges > 0.005) {
+        envoisToAppend.push({ name: player.name, amount: newCharges });
+      }
       sentCount++;
     } catch (e) {
       const reason = e instanceof Error ? e.message : "Unknown error";

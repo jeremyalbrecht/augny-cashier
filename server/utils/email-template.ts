@@ -141,6 +141,17 @@ export function renderRecapEmail(player: PlayerBalance, opts: RenderEmailOptions
     ? sectionCard("🏆 Tournois", tournamentListItems)
     : "";
 
+  // Surface invoices from previous recaps that are still (fully or partially)
+  // unpaid. The amount carried by `unpaidInvoices` is the remaining unpaid
+  // portion, so a 50€ invoice with 30€ left shows "30,00 €".
+  const unpaidInvoiceItems = player.unpaidInvoices.map((inv) => {
+    const label = inv.note ? escapeHtml(inv.note) : "Récap";
+    return `<div style="${ROW}"><b>${label}</b> (${escapeHtml(inv.date)}) → ${formatEuro(inv.amount)}</div>`;
+  }).join("");
+  const unpaidInvoicesSection = unpaidInvoiceItems
+    ? sectionCard("⚠️ Factures non réglées des périodes précédentes", unpaidInvoiceItems)
+    : "";
+
   return `<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -176,6 +187,7 @@ export function renderRecapEmail(player: PlayerBalance, opts: RenderEmailOptions
     <!-- Sections -->
     <tr>
       <td style="padding: 0 6px;">
+        ${unpaidInvoicesSection}
         ${debtSection}
         ${tournamentSection}
       </td>

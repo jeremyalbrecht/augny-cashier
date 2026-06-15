@@ -107,15 +107,14 @@ export interface PlayerBalance {
   name: string;
   email?: string;
   licence?: string;
-  // --- Current-period view (cutoff-filtered) — drives "Total dû" ---
+  // --- Current-period view (cutoff-filtered) — line breakdown for the UI ---
   purchasesTotal: number;
   tournamentsTotal: number;
   paymentsTotal: number;
-  total: number;
   lines: DebtLine[];
   tournaments: TournamentLine[];
   payments: PaymentLine[];
-  // --- Invoice tracking (unfiltered) — drives "Non payés" ---
+  // --- Invoice tracking (unfiltered) — drives "Non payés" + total Solde ---
   /** Total of all Envois rows for this player (every recap ever sent). */
   invoicesTotal: number;
   /** Total of ALL Paiements rows for this player, regardless of cutoff. */
@@ -128,6 +127,16 @@ export interface PlayerBalance {
   /** Number of invoices not fully covered by paymentsTotalAll, walked FIFO
    *  in chronological order. A partially-covered invoice counts as unpaid. */
   unpaidInvoiceCount: number;
+  /** The actual unpaid (or partially-paid) invoices, FIFO. Partial entries
+   *  carry the remaining unpaid amount, not the original invoice amount. */
+  unpaidInvoices: InvoiceLine[];
+  /**
+   * Full Solde: prior-period outstanding from Envois + current-period charges.
+   *   total = purchasesTotal + tournamentsTotal + invoicesTotal − paymentsTotalAll
+   * Negative values are real (player has paid more than billed/owed = credit).
+   * This is the number drivers (UI badge, "Total dû", recap-email "Total dû") read.
+   */
+  total: number;
 }
 
 const FRENCH_MONTHS: Record<string, number> = {
@@ -287,6 +296,7 @@ export function computeBalances(input: ComputeBalancesInput): PlayerBalance[] {
       outstandingFromInvoices: 0,
       invoices: [],
       unpaidInvoiceCount: 0,
+      unpaidInvoices: [],
     };
     players.set(j.Nom, p);
     if (p.licence) byLicence.set(p.licence, p);
@@ -372,7 +382,10 @@ export function computeBalances(input: ComputeBalancesInput): PlayerBalance[] {
       p.tournaments = p.tournaments.filter((t) => afterCutoff(t.date, cutoffDate, true));
     }
     p.tournamentsTotal = p.tournaments.reduce((s, t) => s + t.due, 0);
-    p.total = p.purchasesTotal + p.tournamentsTotal - p.paymentsTotal;
+    // Solde = prior outstanding (invoices − payments, can go negative for credit)
+    //         + current-period charges. Equivalent to: everything billed/owed
+    //         all-time − everything paid all-time.
+    p.total = p.purchasesTotal + p.tournamentsTotal + p.invoicesTotal - p.paymentsTotalAll;
     p.outstandingFromInvoices = Math.max(p.invoicesTotal - p.paymentsTotalAll, 0);
 
     // FIFO walk: count invoices not fully covered by total payments. Sort
@@ -385,15 +398,24 @@ export function computeBalances(input: ComputeBalancesInput): PlayerBalance[] {
     });
     let remaining = p.paymentsTotalAll;
     let unpaid = 0;
+    const unpaidInvoices: InvoiceLine[] = [];
     for (const inv of sortedInvoices) {
       if (remaining >= inv.amount) {
         remaining -= inv.amount;
       } else {
         unpaid++;
-        remaining = 0; // partial counts as unpaid; subsequent invoices all unpaid
+        // For a partially-covered invoice, surface only the unpaid portion so
+        // the recap-email line reflects "what's still owed on this invoice".
+        unpaidInvoices.push({
+          amount: inv.amount - remaining,
+          date: inv.date,
+          note: inv.note,
+        });
+        remaining = 0;
       }
     }
     p.unpaidInvoiceCount = unpaid;
+    p.unpaidInvoices = unpaidInvoices;
   }
 
   return Array.from(players.values()).sort((a, b) => b.total - a.total);

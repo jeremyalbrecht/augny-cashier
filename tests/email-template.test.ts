@@ -18,6 +18,8 @@ function makePlayer(overrides: Partial<PlayerBalance> = {}): PlayerBalance {
     paymentsTotalAll: 0,
     outstandingFromInvoices: 0,
     invoices: [],
+    unpaidInvoiceCount: 0,
+    unpaidInvoices: [],
     ...overrides,
   };
 }
@@ -143,6 +145,27 @@ describe("renderRecapEmail", () => {
     const html = renderRecapEmail(makePlayer());
     expect(html).toMatch(/<img[^>]+src="https:\/\/www\.augny-badminton\.fr\/_nuxt\/logo\.[^"]+\.png"/);
     expect(html).toMatch(/alt="Augny Badminton"/);
+  });
+
+  it("lists unpaid invoices from previous recaps when present", () => {
+    const html = renderRecapEmail(
+      makePlayer({
+        unpaidInvoices: [
+          { amount: 30, date: "01/07/2026", note: "Récap trimestriel" },
+          { amount: 20, date: "01/10/2026", note: "Récap trimestriel" },
+        ],
+        unpaidInvoiceCount: 2,
+        total: 50,
+      }),
+    );
+    expect(html).toMatch(/Factures non réglées des périodes précédentes/);
+    expect(html).toMatch(/<b>Récap trimestriel<\/b> \(01\/07\/2026\) → 30,00 €/);
+    expect(html).toMatch(/<b>Récap trimestriel<\/b> \(01\/10\/2026\) → 20,00 €/);
+  });
+
+  it("does not show the unpaid-invoices section when there are none", () => {
+    const html = renderRecapEmail(makePlayer());
+    expect(html).not.toMatch(/Factures non réglées/);
   });
 
   it("escapes HTML special chars in player name / item / tournament name", () => {

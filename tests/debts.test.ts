@@ -206,6 +206,34 @@ describe("computeBalances outstanding-from-invoices", () => {
     expect(alice.paymentsTotal).toBe(30);       // only post-cutoff
   });
 
+  it("Solde includes prior-period outstanding from Envois + current charges", () => {
+    // 100 invoiced + 30 paid → 70 outstanding from prior period.
+    // 25 in current period charges. Solde must show 70 + 25 = 95.
+    const result = computeBalances({
+      ...base,
+      tarifs: [{ Item: "RSL", "Catégorie": "Volants", Prix: "25,00 €" }],
+      dettes: [{ Nom: "ALICE Test", Item: "RSL", Prix: "25,00 €", Date: "15/05/2026" }],
+      paiements: [{ Nom: "ALICE Test", Montant: "30,00 €", Date: "01/05/2026" }],
+      envois: [{ Nom: "ALICE Test", Montant: "100,00 €", Date: "01/04/2026" }],
+    });
+    const alice = result.find((p) => p.name === "ALICE Test")!;
+    expect(alice.outstandingFromInvoices).toBe(70);
+    expect(alice.purchasesTotal).toBe(25);
+    expect(alice.total).toBe(95);
+  });
+
+  it("Solde goes negative when player has overpaid (credit)", () => {
+    // 50 invoiced, 80 paid → −30 (credit). No current charges → Solde = −30.
+    const result = computeBalances({
+      ...base,
+      paiements: [{ Nom: "ALICE Test", Montant: "80,00 €", Date: "15/04/2026" }],
+      envois: [{ Nom: "ALICE Test", Montant: "50,00 €", Date: "01/04/2026" }],
+    });
+    const alice = result.find((p) => p.name === "ALICE Test")!;
+    expect(alice.outstandingFromInvoices).toBe(0);
+    expect(alice.total).toBe(-30);
+  });
+
   it("returns 0 outstanding when no invoices have been sent yet", () => {
     const result = computeBalances({
       ...base,
@@ -271,6 +299,22 @@ describe("computeBalances outstanding-from-invoices", () => {
     expect(alice.unpaidInvoiceCount).toBe(0);
   });
 
+  it("exposes the unpaid invoices (with remaining amount for partials)", () => {
+    const result = computeBalances({
+      ...base,
+      paiements: [{ Nom: "ALICE Test", Montant: "65,00 €", Date: "15/04/2026" }],
+      envois: [
+        { Nom: "ALICE Test", Montant: "50,00 €", Date: "01/04/2026" }, // fully paid
+        { Nom: "ALICE Test", Montant: "30,00 €", Date: "01/07/2026" }, // partial: 15 left
+        { Nom: "ALICE Test", Montant: "20,00 €", Date: "01/10/2026" }, // fully unpaid
+      ],
+    });
+    const alice = result.find((p) => p.name === "ALICE Test")!;
+    expect(alice.unpaidInvoices).toHaveLength(2);
+    expect(alice.unpaidInvoices[0]).toMatchObject({ amount: 15, date: "01/07/2026" });
+    expect(alice.unpaidInvoices[1]).toMatchObject({ amount: 20, date: "01/10/2026" });
+  });
+
   it("sorts invoices chronologically before walking (sheet order ignored)", () => {
     // Newest first in sheet — chronological order should make 01/04 the
     // first to be paid by the 50€ payment.
@@ -320,7 +364,7 @@ describe("computeBalances with cutoff", () => {
     expect(alice.purchasesTotal).toBe(56);
   });
 
-  it("filters Paiements by cutoff", () => {
+  it("filters Paiements by cutoff (display list); total counts all payments", () => {
     const dettes: DetteRow[] = [
       { Nom: "ALICE Test", Item: "RSL", Prix: "100,00 €", Date: "15/04/2026" },
     ];
@@ -336,9 +380,11 @@ describe("computeBalances with cutoff", () => {
       cutoffDate: new Date(2026, 3, 1),
     });
     const alice = result.find((p) => p.name === "ALICE Test")!;
+    // Cutoff filter still applies to the display list and current-period sum
     expect(alice.payments).toHaveLength(1);
     expect(alice.paymentsTotal).toBe(30);
-    expect(alice.total).toBe(70);
+    // total = current charges (100) + invoices (0) − all payments (80) = 20
+    expect(alice.total).toBe(20);
   });
 
   it("filters tournaments with parseable dates by cutoff", () => {

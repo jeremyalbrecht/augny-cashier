@@ -216,6 +216,16 @@ const submit = async () => {
           </svg>
           <span class="self-center text-2xl font-semibold whitespace-nowrap dark:text-white">Cashier</span>
         </a>
+        <NuxtLink
+          to="/dettes"
+          @click.stop
+          class="ml-auto inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+        >
+          <svg class="w-4 h-4" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 3h18M3 9h18M3 15h18M3 21h18" />
+          </svg>
+          <span>Dettes</span>
+        </NuxtLink>
       </div>
     </nav>
     <form class="max-w-sm mx-auto mt-2">
@@ -242,7 +252,7 @@ const submit = async () => {
         </div>
       </template>
 
-      <div v-if="!playerSelected && !completed" class="fixed inset-x-0 bottom-0 p-4 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
+      <div v-if="!playerSelected && !completed" class="fixed inset-x-0 bottom-0 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
         <button type="button" @click="openSearch()"
                 class="w-full flex items-center gap-3 px-4 py-3 bg-gray-100 dark:bg-gray-800 rounded-xl text-base text-gray-400 dark:text-gray-500">
           <svg class="w-4 h-4 shrink-0" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20">
@@ -349,7 +359,7 @@ const submit = async () => {
       </template>
 
       <template v-if="playerSelected && itemSelected && quantity > 0 && !completed">
-        <div class="fixed inset-x-0 bottom-0 p-4">
+        <div class="fixed inset-x-0 bottom-0 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <button type="button" @click="submit()" :disabled="loading" class="w-full bg-blue-600 text-white text-lg font-semibold py-4 rounded-lg shadow-lg flex items-center justify-center space-x-4 hover:bg-blue-700 dark:hover:bg-blue-500 transition-colors duration-300 disabled:opacity-60 disabled:cursor-not-allowed">
             <span class="bg-white text-blue-600 text-lg font-bold py-2 px-4 rounded-md">
               {{ Euro.format(quantity * parseFloat(('' + item['Prix']).split(' ')[0]))}}
@@ -390,8 +400,8 @@ const submit = async () => {
 
     <Teleport to="body">
       <Transition name="search">
-        <div v-if="searchOpen" class="fixed inset-0 z-50 flex flex-col bg-white dark:bg-gray-900">
-          <div class="flex-1 overflow-y-auto overscroll-contain">
+        <div v-if="searchOpen" class="search-overlay fixed inset-0 z-50 flex flex-col bg-white dark:bg-gray-900">
+          <div class="flex-1 overflow-y-auto overscroll-contain search-overlay-list">
             <p v-if="player.length === 0" class="px-4 py-6 text-center text-sm text-gray-400">
               Commencez à taper un nom…
             </p>
@@ -439,7 +449,7 @@ const submit = async () => {
               </svg>
             </button>
           </div>
-          <div class="flex items-center gap-3 px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+          <div class="search-overlay-footer flex items-center gap-3 px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
             <div class="relative flex-1">
               <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
                 <svg class="w-4 h-4 text-gray-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20">
@@ -495,6 +505,16 @@ const submit = async () => {
 .search-leave-to {
   opacity: 0;
   transform: translateY(16px);
+}
+
+/* iOS Safari: fixed inset-0 sits behind the URL bar / home indicator. Push
+   the scrollable list down by the safe area inset so the first result isn't
+   hidden behind the address bar, and pad the footer for the home indicator. */
+.search-overlay-list {
+  padding-top: env(safe-area-inset-top);
+}
+.search-overlay-footer {
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
 }
 
 .success-checkmark {

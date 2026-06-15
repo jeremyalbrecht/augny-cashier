@@ -49,6 +49,7 @@ interface PlayerBalance {
   outstandingFromInvoices: number;
   invoices: InvoiceLine[];
   unpaidInvoiceCount: number;
+  unpaidInvoices: InvoiceLine[];
 }
 interface DebtsResponse {
   data: PlayerBalance[];
@@ -152,9 +153,26 @@ function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function parseFrDate(s: string): number {
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+  if (!m) return 0;
+  return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime();
+}
+
+function lastInvoiceAmount(p: PlayerBalance): number | null {
+  if (!p.invoices.length) return null;
+  // Sort by date desc, fall back to insertion order for unparseable dates.
+  const sorted = [...p.invoices].sort((a, b) => parseFrDate(b.date) - parseFrDate(a.date));
+  return sorted[0]?.amount ?? null;
+}
+
 function openPaymentForm() {
   if (!selected.value) return;
-  paymentForm.montant = selected.value.total > 0 ? selected.value.total.toFixed(2) : "";
+  // Pre-populate with the amount of the most recent recap email — most
+  // payments refer to that invoice. Fall back to the current Solde, then empty.
+  const lastInvoice = lastInvoiceAmount(selected.value);
+  const prefill = lastInvoice ?? (selected.value.total > 0 ? selected.value.total : null);
+  paymentForm.montant = prefill != null ? prefill.toFixed(2) : "";
   paymentForm.date = todayIsoDate();
   paymentForm.methode = "Virement";
   paymentForm.note = "";
