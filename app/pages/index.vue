@@ -401,7 +401,34 @@ const submit = async () => {
     <Teleport to="body">
       <Transition name="search">
         <div v-if="searchOpen" class="search-overlay fixed inset-0 z-50 flex flex-col bg-white dark:bg-gray-900">
-          <div class="flex-1 overflow-y-auto overscroll-contain search-overlay-list">
+          <!-- Search header pinned to the top — iOS keyboard covers the bottom
+               half of the screen, so a bottom-anchored input gets hidden. The
+               Spotlight/Slack/Gmail pattern puts search at the top instead. -->
+          <div class="search-overlay-header flex items-center gap-3 px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+            <div class="relative flex-1">
+              <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                <svg class="w-4 h-4 text-gray-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20">
+                  <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m19 19-4-4m0-7A7 7 0 1 1 1 8a7 7 0 0 1 14 0Z"/>
+                </svg>
+              </div>
+              <input
+                ref="searchInputEl"
+                v-model="player"
+                @input="onInput"
+                type="text"
+                id="player-input"
+                autocomplete="off"
+                autocorrect="off"
+                spellcheck="false"
+                class="w-full pl-10 pr-4 py-2.5 bg-gray-100 dark:bg-gray-800 rounded-xl border-0 text-gray-900 dark:text-white text-base focus:ring-0 focus:outline-none"
+                placeholder="Rechercher un adhérent"
+              >
+            </div>
+            <button type="button" @click="closeSearch()" class="text-blue-600 dark:text-blue-400 font-medium text-base whitespace-nowrap shrink-0">
+              Annuler
+            </button>
+          </div>
+          <div class="flex-1 overflow-y-auto overscroll-contain">
             <p v-if="player.length === 0" class="px-4 py-6 text-center text-sm text-gray-400">
               Commencez à taper un nom…
             </p>
@@ -449,30 +476,6 @@ const submit = async () => {
               </svg>
             </button>
           </div>
-          <div class="search-overlay-footer flex items-center gap-3 px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-            <div class="relative flex-1">
-              <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                <svg class="w-4 h-4 text-gray-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20">
-                  <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m19 19-4-4m0-7A7 7 0 1 1 1 8a7 7 0 0 1 14 0Z"/>
-                </svg>
-              </div>
-              <input
-                ref="searchInputEl"
-                v-model="player"
-                @input="onInput"
-                type="text"
-                id="player-input"
-                autocomplete="off"
-                autocorrect="off"
-                spellcheck="false"
-                class="w-full pl-10 pr-4 py-2.5 bg-gray-100 dark:bg-gray-800 rounded-xl border-0 text-gray-900 dark:text-white text-base focus:ring-0 focus:outline-none"
-                placeholder="Rechercher un adhérent"
-              >
-            </div>
-            <button type="button" @click="closeSearch()" class="text-blue-600 dark:text-blue-400 font-medium text-base whitespace-nowrap shrink-0">
-              Annuler
-            </button>
-          </div>
         </div>
       </Transition>
     </Teleport>
@@ -507,14 +510,11 @@ const submit = async () => {
   transform: translateY(16px);
 }
 
-/* iOS Safari: fixed inset-0 sits behind the URL bar / home indicator. Push
-   the scrollable list down by the safe area inset so the first result isn't
-   hidden behind the address bar, and pad the footer for the home indicator. */
-.search-overlay-list {
-  padding-top: env(safe-area-inset-top);
-}
-.search-overlay-footer {
-  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
+/* iOS Safari: fixed inset-0 sits behind the URL bar. Push the search header
+   down by the safe area inset so the input isn't covered. The input is
+   anchored at the top so the on-screen keyboard can't hide it. */
+.search-overlay-header {
+  padding-top: calc(0.75rem + env(safe-area-inset-top));
 }
 
 .success-checkmark {

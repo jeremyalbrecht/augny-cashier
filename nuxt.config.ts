@@ -12,7 +12,7 @@ export default defineNuxtConfig({
       head: {
           title: 'Augny Badminton Cashier - Enregistrement des dettes',
         charset: 'utf-8',
-        viewport: 'width=device-width, initial-scale=1, maximum-scale=1.0, user-scalable=0, viewport-fit=cover',
+        viewport: 'width=device-width, initial-scale=1, maximum-scale=1.0, user-scalable=0, viewport-fit=cover, interactive-widget=resizes-content',
       }
     },
     css: ['~/assets/css/main.css'],
