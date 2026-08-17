@@ -105,7 +105,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: "names[] required" });
   }
 
-  const { smtp, sa } = useRuntimeConfig(event);
+  const { smtp, sa, publicSiteUrl } = useRuntimeConfig(event);
   if (!smtp?.user || !smtp?.password) {
     throw createError({
       statusCode: 500,
@@ -136,7 +136,7 @@ export default defineEventHandler(async (event) => {
       results.push({ name, email: player.email, status: "skipped", reason: "Nothing owed" });
       continue;
     }
-    const html = renderRecapEmail(player, { cutoffDateLabel: cutoffStr });
+    const html = renderRecapEmail(player, { cutoffDateLabel: cutoffStr, publicSiteUrl: publicSiteUrl as string });
     try {
       await sendHtmlEmail(
         { user: smtp.user as string, password: smtp.password as string },

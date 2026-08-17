@@ -240,6 +240,17 @@ const submit = async () => {
           </div>
           <button type="button" @click="deselectPlayer()" class="text-sm font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200">Changer</button>
         </div>
+        <!-- Payment link — shown before the debt badge so it's the first thing seen -->
+        <a
+          v-if="balance != null && balance > 0.01"
+          :href="`/pay/${encodeURIComponent(player)}`"
+          target="_blank"
+          rel="noopener"
+          class="mt-2 flex items-center justify-center gap-2 w-full px-3 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-md transition-colors"
+        >
+          💳 Payer par CB (HelloAsso)
+        </a>
+
         <!-- Live balance badge -->
         <div class="mt-2 px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md text-sm flex items-center justify-between">
           <span class="text-gray-500 dark:text-gray-400">Solde actuel</span>
