@@ -17,7 +17,8 @@ export default defineEventHandler(async (event) => {
     ? `${String(cutoffDate.getDate()).padStart(2, "0")}/${String(cutoffDate.getMonth() + 1).padStart(2, "0")}/${cutoffDate.getFullYear()}`
     : null;
 
-  const html = renderRecapEmail(player, { cutoffDateLabel: cutoffLabel });
+  const { publicSiteUrl } = useRuntimeConfig(event);
+  const html = renderRecapEmail(player, { cutoffDateLabel: cutoffLabel, publicSiteUrl: publicSiteUrl as string });
 
   return {
     name: player.name,

@@ -28,6 +28,7 @@ The most non-obvious thing about the codebase. Three completely separate auth me
 | Shared X-Token | Cashier (`/`, `/api/players`, `/api/prices`, `/api/push`, `/api/balance/[name]`, `/api/comitee`) | `X-Token` header or `?token=` query → cookie. Same token for everyone on the gym tablet. | `server/middleware/auth.ts` enforces. `runtimeConfig.token` = expected value. |
 | Google OAuth + allowlist | Admin (`/dettes`, `/api/debts*`, `/api/payments`, `/api/send-summary*`, `/api/relances`) | Sign-in via `/auth/google`, session cookie. Email must appear in the `Comité` sheet's column A. | `requireAdmin()` in `server/utils/require-admin.ts` (60s in-memory cache of the allowlist). |
 | Google OAuth **or** magic link + roster | Member (`/mon-compte`, `/api/member/*`) | Google sign-in, or a 6-digit code / one-tap link e-mailed via `/api/member/magic/*`. Email must match a `Joueurs` **Email** cell. | `requireMember()` in `server/utils/require-member.ts` (60s roster cache). Identifier resolution in `server/utils/roster.ts`. |
+| None (public) | `/pay/[name]` (HelloAsso payment redirect) | No token, no session — deliberately, since it's clicked from a member's personal e-mail. Sensitivity is capped by design: the amount is always read server-side from the member's real balance, never taken from the URL/query, so the worst case is someone pays off another member's debt. | Lives at `server/routes/pay/[name].get.ts`, **outside `/api`**, so it isn't touched by the X-Token middleware at all (same trick `server/routes/auth/google.get.ts` uses). |
 
 **To add a new endpoint, decide which tier it belongs to**:
 
@@ -106,6 +107,19 @@ Dead endpoints (404/410) are deleted on send — otherwise they accumulate forev
 
 `/auth/magic` has a 5-minute `REUSE_GRACE_MS` window: mail scanners (Outlook SafeLinks, antivirus gateways) prefetch links, and strict single-use would burn the token before the member ever taps it. The typed-code path stays strictly single-use.
 
+## HelloAsso payment integration
+
+Members can pay their debt by card via HelloAsso (free for non-profits) instead of bank transfer. Two entry points, one mechanism:
+
+- The quarterly recap email (`server/utils/email-template.ts`) has a "💳 Payer par CB (HelloAsso)" button next to the RIB link.
+- The cashier screen (`app/pages/index.vue`) shows the same button above the "Solde actuel" badge once a player with a positive balance is selected.
+
+Both link to `/pay/[name]` (`server/routes/pay/[name].get.ts`), which looks up the member's live balance, calls the HelloAsso Checkout API (`server/utils/helloasso.ts`) to mint a **checkout-intent**, and 302-redirects there. This indirection exists because a checkout-intent's `redirectUrl` is only valid for **15 minutes** — it can't be embedded directly in an email sent hours or days before it's opened, so the link always points at our own stable URL, which mints a fresh intent at click time.
+
+`server/utils/helloasso.ts` handles OAuth2 `client_credentials` auth against HelloAsso (access token cached in-memory, ~30 min TTL, re-fetched on expiry — no refresh-token juggling) and the `POST /v5/organizations/{slug}/checkout-intents` call.
+
+**Not implemented**: reconciling completed HelloAsso payments back into the `Paiements` sheet. This integration only makes paying easier — it doesn't mark a debt as paid. A treasurer still needs to notice the HelloAsso payment and record it (or a future change could add a webhook for this).
+
 ## Where the business rules live
 
 **`server/utils/debts.ts`** — every rule the system encodes:
@@ -177,6 +191,10 @@ A partial failure here is recoverable: if writes 2 or 3 fail, you can manually a
 - `NUXT_PUBLIC_VAPID_PUBLIC_KEY` — same public key, exposed to the browser so it can subscribe
 
 Note: the GitHub Actions workflow only passes `GOOGLE_SHEET_ID`, `NUXT_SA` and `NUXT_TOKEN`. Everything else (OAuth, session password, SMTP, Cloudflare, VAPID) lives in the **Azure Portal app settings** — add new secrets there, not to the workflow.
+- `NUXT_HELLOASSO_CLIENT_ID` / `NUXT_HELLOASSO_CLIENT_SECRET` — HelloAsso API client (`helloasso.clientId`/`clientSecret`). **Not yet provisioned** — create a HelloAsso org (sandbox first: [helloasso-sandbox.com](https://www.helloasso-sandbox.com)), then generate an API client from its back office (Réglages → API) to get these.
+- `NUXT_HELLOASSO_SANDBOX` — set to `"true"` to hit `api.helloasso-sandbox.com` instead of `api.helloasso.com` (`helloasso.sandbox`). Leave unset/`"false"` in production.
+- `HELLOASSO_ORGANIZATION_SLUG` — the club's HelloAsso organization slug (plain env, matches the `GOOGLE_SHEET_ID` convention) — visible in the URL of the org's HelloAsso back office, e.g. `augny-badminton` in `helloasso.com/associations/augny-badminton`.
+- `NUXT_PUBLIC_SITE_URL` — absolute origin of this app (e.g. `https://cashier.augny-badminton.fr`), used to build the `/pay/[name]` link inside recap e-mails (`publicSiteUrl`). Without it, the payment button is simply omitted from the e-mail (the cashier-screen button doesn't need it — it uses a relative URL). If unset, `/pay/[name]` itself still falls back to the request's own host for its HelloAsso `backUrl`/`errorUrl`/`returnUrl`.
 
 ## Tests
 

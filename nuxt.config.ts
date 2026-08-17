@@ -58,6 +58,13 @@ export default defineNuxtConfig({
             // in any production build.
             debugAuth: false,
         },
+        // HelloAsso Checkout API client. Env vars: NUXT_HELLOASSO_CLIENT_ID,
+        // NUXT_HELLOASSO_CLIENT_SECRET, NUXT_HELLOASSO_SANDBOX ('true' to use
+        // api.helloasso-sandbox.com instead of api.helloasso.com).
+        helloasso: { clientId: '', clientSecret: '', sandbox: '' },
+        // Absolute origin used to build the /pay/[name] link in recap emails.
+        // Env var: NUXT_PUBLIC_SITE_URL (e.g. https://cashier.augny-badminton.fr)
+        publicSiteUrl: '',
     },
     postcss: {
         plugins: {

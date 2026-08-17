@@ -267,4 +267,29 @@ describe("renderRecapEmail — performance highlight", () => {
     }));
     expect(html).toMatch(/Bravo pour ta victoire à &lt;script&gt;x&lt;\/script&gt;/);
   });
+
+  describe("HelloAsso payment link", () => {
+    it("includes a payment link for a player with a positive total", () => {
+      const html = renderRecapEmail(
+        makePlayer({ name: "DUPONT Jean", total: 28 }),
+        { publicSiteUrl: "https://cashier.augny-badminton.fr" },
+      );
+      expect(html).toMatch(
+        /https:\/\/cashier\.augny-badminton\.fr\/pay\/DUPONT%20Jean/,
+      );
+    });
+
+    it("omits the payment link when total is 0", () => {
+      const html = renderRecapEmail(
+        makePlayer({ total: 0 }),
+        { publicSiteUrl: "https://cashier.augny-badminton.fr" },
+      );
+      expect(html).not.toMatch(/HelloAsso/);
+    });
+
+    it("omits the payment link when publicSiteUrl is not provided", () => {
+      const html = renderRecapEmail(makePlayer({ total: 28 }));
+      expect(html).not.toMatch(/HelloAsso/);
+    });
+  });
 });
