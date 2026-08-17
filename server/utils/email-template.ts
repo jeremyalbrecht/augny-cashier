@@ -231,3 +231,113 @@ export function renderRecapEmail(player: PlayerBalance, opts: RenderEmailOptions
 </body>
 </html>`;
 }
+
+// ---------------------------------------------------------------------------
+// Magic-link sign-in e-mail.
+//
+// Carries BOTH a 6-digit code and a one-tap link, deliberately. The link is
+// fastest on mobile, but mail apps frequently open links in an in-app webview
+// — the session cookie would land in a browser the member never returns to,
+// and they'd appear permanently signed out. The code lets them finish in the
+// tab they already have open.
+// ---------------------------------------------------------------------------
+
+export interface MagicLinkEmailOptions {
+  /** Player name from the roster, for the greeting. */
+  name: string;
+  /** The 6-digit code, in plaintext (this e-mail is the only place it exists). */
+  code: string;
+  /** Absolute one-tap sign-in URL. */
+  link: string;
+  /** Minutes until the code expires, for the expiry notice. */
+  expiresInMinutes: number;
+}
+
+export function renderMagicLinkEmail(opts: MagicLinkEmailOptions): string {
+  const { name, code, link, expiresInMinutes } = opts;
+  // Space the digits so they're readable at a glance and easy to copy.
+  const spacedCode = escapeHtml(code).split("").join(" ");
+
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Connexion — Augny Badminton</title>
+</head>
+<body style="margin: 0; padding: 24px 12px; background: ${BG}; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; color: ${TEXT};">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="max-width: 580px; margin: 0 auto;">
+    <tr>
+      <td style="background: #ffffff; padding: 28px 28px 18px 28px; text-align: center; border-radius: 12px 12px 0 0;">
+        <img src="${LOGO_URL}" alt="Augny Badminton" width="120" style="display: inline-block; height: auto; max-width: 120px; border: 0;">
+      </td>
+    </tr>
+    <tr>
+      <td style="background: ${NAVY}; padding: 10px 28px; text-align: center;">
+        <p style="margin: 0; font-size: 11px; color: #ffffff; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em;">
+          Espace adhérent
+        </p>
+      </td>
+    </tr>
+
+    <tr>
+      <td style="background: #ffffff; padding: 24px 28px 8px 28px;">
+        <p style="margin: 0 0 6px 0; font-size: 16px; font-weight: 600;">Bonjour ${escapeHtml(name)},</p>
+        <p style="margin: 0; font-size: 14px; color: ${MUTED}; line-height: 1.5;">
+          Voici ton code de connexion à l'espace adhérent.
+        </p>
+      </td>
+    </tr>
+
+    <!-- Code card -->
+    <tr>
+      <td style="background: #ffffff; padding: 8px 28px 4px 28px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+          <tr>
+            <td style="padding: 22px; background: ${TOTAL_BG}; border-radius: 10px; text-align: center;">
+              <p style="margin: 0 0 8px 0; font-size: 11px; font-weight: 700; color: ${NAVY}; text-transform: uppercase; letter-spacing: 0.08em;">
+                Ton code
+              </p>
+              <p style="margin: 0; font-size: 34px; font-weight: 700; color: ${NAVY}; letter-spacing: 0.18em;">
+                ${spacedCode}
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+
+    <!-- One-tap link -->
+    <tr>
+      <td style="background: #ffffff; padding: 16px 28px 24px 28px; text-align: center;">
+        <a href="${escapeHtml(link)}" style="display: inline-block; padding: 12px 26px; background: ${NAVY}; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 14px;">
+          Se connecter directement
+        </a>
+        <p style="margin: 14px 0 0 0; font-size: 12px; color: ${MUTED}; line-height: 1.5;">
+          Ce code et ce lien expirent dans ${expiresInMinutes} minutes et ne fonctionnent qu'une seule fois.
+        </p>
+      </td>
+    </tr>
+
+    <tr>
+      <td style="background: #ffffff; padding: 0 28px 20px 28px;">
+        <p style="margin: 0; font-size: 12px; color: ${MUTED}; line-height: 1.5;">
+          Si tu n'as pas demandé à te connecter, ignore simplement cet e-mail —
+          personne ne peut accéder à ton compte sans ce code.
+        </p>
+      </td>
+    </tr>
+
+    <tr>
+      <td style="background: #ffffff; padding: 0 28px 18px 28px; border-radius: 0 0 12px 12px; border-top: 1px solid ${CARD_BORDER};">
+        <p style="margin: 14px 0 0 0; font-size: 12px; color: ${MUTED}; line-height: 1.5;">
+          Sportivement,<br>
+          <strong style="color: ${TEXT};">Augny Badminton</strong><br>
+          Rue de la libération 57685 AUGNY
+        </p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}

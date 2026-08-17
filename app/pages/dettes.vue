@@ -122,21 +122,11 @@ const selected = computed(() =>
 );
 
 const summary = computed(() => debts.value?.summary);
-const cutoffDisplay = computed(() => {
-  const iso = summary.value?.cutoffDate;
-  if (!iso) return null;
-  const [y, m, d] = iso.split("-");
-  return `${d}/${m}/${y}`;
-});
+const cutoffDisplay = computed(() => isoToFR(summary.value?.cutoffDate));
 const unparseable = computed(() => summary.value?.unparseableTournamentDates ?? []);
 const showUnparseable = ref(false);
 
-const Euro = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
-const balanceClass = (n: number) => {
-  if (n > 0.01) return "text-red-600 dark:text-red-400";
-  if (n < -0.01) return "text-green-600 dark:text-green-400";
-  return "text-gray-400";
-};
+// Euro, balanceClass and isoToFR come from app/composables/useFormat.ts.
 
 // --- Payment form ---
 const paymentOpen = ref(false);
@@ -231,6 +221,79 @@ interface SendResponse {
   skippedCount: number;
   errorCount: number;
   newCutoffDate: string | null;
+  pushSentCount?: number;
+  pushError?: string | null;
+}
+
+// --- Relances (payment reminders) ---
+interface RelanceCandidate {
+  name: string;
+  email?: string;
+  outstanding: number;
+  oldestUnpaidDate: string;
+  daysOverdue: number;
+  hasPush: boolean;
+}
+interface RelanceDryRun {
+  dryRun: true;
+  candidates: RelanceCandidate[];
+  reachableCount: number;
+  unreachableCount: number;
+}
+interface RelanceSendResult {
+  dryRun: false;
+  sent: number;
+  failed: number;
+  pruned: number;
+  noSubscription: string[];
+  notified: string[];
+}
+
+const relanceOpen = ref(false);
+const relanceLoading = ref(false);
+const relanceSending = ref(false);
+const relancePreview = ref<RelanceDryRun | null>(null);
+const relanceResult = ref<RelanceSendResult | null>(null);
+const relanceError = ref<string | null>(null);
+
+async function openRelances() {
+  relanceLoading.value = true;
+  relanceError.value = null;
+  relanceResult.value = null;
+  relancePreview.value = null;
+  try {
+    // Dry run first: the same selection logic decides who is listed here and
+    // who actually gets notified, so the preview can't drift from reality.
+    relancePreview.value = await $fetch<RelanceDryRun>("/api/relances", {
+      method: "POST",
+      body: { dryRun: true },
+    });
+    relanceOpen.value = true;
+  } catch (e: unknown) {
+    relanceError.value =
+      (e as { statusMessage?: string })?.statusMessage ?? "Erreur lors du chargement des relances";
+    relanceOpen.value = true;
+  } finally {
+    relanceLoading.value = false;
+  }
+}
+
+async function sendRelances() {
+  if (relanceSending.value) return;
+  relanceSending.value = true;
+  relanceError.value = null;
+  try {
+    relanceResult.value = await $fetch<RelanceSendResult>("/api/relances", {
+      method: "POST",
+      body: { dryRun: false },
+    });
+    await loadDebts();
+  } catch (e: unknown) {
+    relanceError.value =
+      (e as { statusMessage?: string })?.statusMessage ?? "Erreur lors de l'envoi des relances";
+  } finally {
+    relanceSending.value = false;
+  }
 }
 
 const recapOpen = ref(false);
@@ -485,6 +548,14 @@ async function openPreview(name: string) {
             @click="openRecap"
           >
             Envoyer le récap ({{ debtorsForRecap.length }})
+          </button>
+          <button
+            type="button"
+            class="px-3 py-2 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700 disabled:opacity-60"
+            :disabled="relanceLoading"
+            @click="openRelances"
+          >
+            {{ relanceLoading ? "Chargement…" : "Relances" }}
           </button>
         </section>
 
@@ -796,6 +867,12 @@ async function openPreview(name: string) {
                 <p v-if="recapResults.newCutoffDate" class="mt-1 text-xs text-blue-700">
                   Nouvelle date de coupure&nbsp;: <strong>{{ recapResults.newCutoffDate }}</strong>
                 </p>
+                <p v-if="recapResults.pushSentCount" class="mt-1 text-xs text-gray-500">
+                  🔔 {{ recapResults.pushSentCount }} notification(s) push envoyée(s)
+                </p>
+                <p v-if="recapResults.pushError" class="mt-1 text-xs text-amber-700">
+                  ⚠️ Notifications push&nbsp;: {{ recapResults.pushError }}
+                </p>
               </div>
               <div class="flex-1 overflow-y-auto">
                 <ul class="divide-y divide-gray-100 dark:divide-gray-800 text-sm">
@@ -931,6 +1008,128 @@ async function openPreview(name: string) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- Relances modal -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div
+          v-if="relanceOpen"
+          class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          @click.self="relanceSending ? null : (relanceOpen = false)"
+        >
+          <div class="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-800">
+              <h3 class="text-lg font-semibold">Relances de paiement</h3>
+              <p class="text-sm text-gray-500 mt-1">
+                Adhérents dont une facture est impayée depuis plus de 14 jours,
+                et non relancés depuis 7 jours.
+              </p>
+            </div>
+
+            <div v-if="relanceError" class="px-6 py-4 text-sm text-red-600 dark:text-red-400">
+              {{ relanceError }}
+            </div>
+
+            <!-- Results -->
+            <template v-else-if="relanceResult">
+              <div class="px-6 py-5 text-sm space-y-2">
+                <p>
+                  ✅ {{ relanceResult.sent }} notification(s) envoyée(s) à
+                  {{ relanceResult.notified.length }} adhérent(s).
+                </p>
+                <p v-if="relanceResult.failed" class="text-red-600 dark:text-red-400">
+                  ❌ {{ relanceResult.failed }} échec(s).
+                </p>
+                <p v-if="relanceResult.pruned" class="text-gray-500">
+                  🧹 {{ relanceResult.pruned }} abonnement(s) expiré(s) supprimé(s).
+                </p>
+                <div
+                  v-if="relanceResult.noSubscription.length"
+                  class="mt-3 px-3 py-2 rounded-md bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800"
+                >
+                  <p class="text-amber-900 dark:text-amber-200 font-medium">
+                    ⚠️ {{ relanceResult.noSubscription.length }} adhérent(s) n'ont
+                    <strong>rien reçu</strong> (pas de notifications activées)&nbsp;:
+                  </p>
+                  <p class="text-amber-800 dark:text-amber-300 mt-1">
+                    {{ relanceResult.noSubscription.join(", ") }}
+                  </p>
+                  <p class="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                    Ils restent éligibles pour la prochaine relance.
+                  </p>
+                </div>
+              </div>
+              <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-800 flex justify-end">
+                <button
+                  type="button"
+                  class="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700"
+                  @click="relanceOpen = false"
+                >
+                  Fermer
+                </button>
+              </div>
+            </template>
+
+            <!-- Preview -->
+            <template v-else-if="relancePreview">
+              <div
+                v-if="relancePreview.unreachableCount > 0"
+                class="mx-6 mt-4 px-3 py-2 rounded-md bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 text-sm text-amber-900 dark:text-amber-200"
+              >
+                ⚠️ {{ relancePreview.reachableCount }} recevront la notification,
+                <strong>{{ relancePreview.unreachableCount }} ne recevront rien</strong>
+                (notifications non activées sur leur téléphone).
+              </div>
+
+              <div class="flex-1 overflow-y-auto mt-3">
+                <p v-if="!relancePreview.candidates.length" class="p-6 text-center text-sm text-gray-500">
+                  Aucune relance à envoyer.
+                </p>
+                <ul v-else class="divide-y divide-gray-100 dark:divide-gray-800">
+                  <li
+                    v-for="c in relancePreview.candidates"
+                    :key="c.name"
+                    class="flex items-center justify-between gap-3 px-6 py-2.5 text-sm"
+                  >
+                    <div class="min-w-0">
+                      <p class="font-medium text-gray-900 dark:text-white truncate">
+                        <span v-if="!c.hasPush" title="Pas de notifications activées">🔕</span>
+                        {{ c.name }}
+                      </p>
+                      <p class="text-xs text-gray-500">
+                        {{ c.daysOverdue }} jours · facture du {{ c.oldestUnpaidDate }}
+                      </p>
+                    </div>
+                    <span class="tabular-nums font-semibold shrink-0" :class="balanceClass(c.outstanding)">
+                      {{ Euro.format(c.outstanding) }}
+                    </span>
+                  </li>
+                </ul>
+              </div>
+
+              <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-800 flex justify-end gap-2">
+                <button
+                  type="button"
+                  class="px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
+                  :disabled="relanceSending"
+                  @click="relanceOpen = false"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  class="px-4 py-2 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700 disabled:opacity-60"
+                  :disabled="relanceSending || !relancePreview.reachableCount"
+                  @click="sendRelances"
+                >
+                  {{ relanceSending ? "Envoi…" : `Notifier ${relancePreview.reachableCount} adhérent(s)` }}
+                </button>
+              </div>
+            </template>
           </div>
         </div>
       </Transition>

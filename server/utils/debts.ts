@@ -119,6 +119,12 @@ export interface PlayerBalance {
   invoicesTotal: number;
   /** Total of ALL Paiements rows for this player, regardless of cutoff. */
   paymentsTotalAll: number;
+  /** Every Paiements row, unfiltered — the list counterpart of
+   *  `paymentsTotalAll`, just as `payments` is the counterpart of
+   *  `paymentsTotal`. Needed to render a prior-period ledger that actually
+   *  balances: `invoices` is unfiltered, so pairing it with the cutoff-filtered
+   *  `payments` would hide older payments and make the arithmetic look wrong. */
+  allPayments: PaymentLine[];
   /** max(invoicesTotal − paymentsTotalAll, 0). Running tally — payments
    *  naturally settle the oldest unpaid invoices first. */
   outstandingFromInvoices: number;
@@ -293,6 +299,7 @@ export function computeBalances(input: ComputeBalancesInput): PlayerBalance[] {
       payments: [],
       invoicesTotal: 0,
       paymentsTotalAll: 0,
+      allPayments: [],
       outstandingFromInvoices: 0,
       invoices: [],
       unpaidInvoiceCount: 0,
@@ -352,8 +359,15 @@ export function computeBalances(input: ComputeBalancesInput): PlayerBalance[] {
     if (!p) continue;
     const amount = parseEuro(row.Montant);
     if (Number.isNaN(amount)) continue;
-    // Unfiltered total — drives the running tally against Envois.
+    // Unfiltered total + list — drive the running tally against Envois and the
+    // member-facing prior-period ledger.
     p.paymentsTotalAll += amount;
+    p.allPayments.push({
+      amount,
+      date: row.Date,
+      method: row.Méthode,
+      note: row.Note,
+    });
     // Cutoff-filtered list + total — drives the current-period "Total dû".
     if (!afterCutoff(row.Date, cutoffDate, false)) continue;
     p.payments.push({

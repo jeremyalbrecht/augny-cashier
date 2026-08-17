@@ -1,15 +1,30 @@
 import { createError, getHeader } from 'h3';
 
-// Admin paths handle their own auth via requireAdmin (Google OAuth + Comité
-// allowlist). The X-Token below is the legacy shared cashier secret.
-// /api/_auth/ is nuxt-auth-utils's own session endpoint (used by useUserSession).
-const ADMIN_PATH_PREFIXES = ['/api/debts', '/api/payments', '/api/auth/', '/api/_auth/', '/api/send-summary'];
+// Paths that handle their own auth and must be carved out of the shared
+// X-Token gate below (which is the legacy cashier-tablet secret):
+//   - /api/debts, /api/payments, /api/send-summary, /api/relances
+//       → requireAdmin (Google OAuth + Comité allowlist)
+//   - /api/member/
+//       → requireMember (Google OAuth or magic link + Joueurs roster), except
+//         the magic-link request/verify routes which are unauthenticated by
+//         necessity — they are how you get a session in the first place.
+//   - /api/auth/, /api/_auth/
+//       → nuxt-auth-utils's own session endpoints (used by useUserSession).
+const SELF_AUTH_PATH_PREFIXES = [
+    '/api/debts',
+    '/api/payments',
+    '/api/send-summary',
+    '/api/relances',
+    '/api/member',
+    '/api/auth/',
+    '/api/_auth/',
+];
 
 export default defineEventHandler((event) => {
     if (!event.path.startsWith('/api')) {
         return;
     }
-    if (ADMIN_PATH_PREFIXES.some((p) => event.path.startsWith(p))) {
+    if (SELF_AUTH_PATH_PREFIXES.some((p) => event.path.startsWith(p))) {
         return;
     }
     const { token } = useRuntimeConfig();

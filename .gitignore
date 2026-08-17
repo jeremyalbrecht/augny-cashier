@@ -22,3 +22,13 @@ logs
 .env
 .env.*
 !.env.example
+
+# Terraform (infra/) — state can contain resource IDs, tfvars can contain secrets
+infra/.terraform/
+# NB: .terraform.lock.hcl is intentionally NOT ignored — it pins provider
+# hashes so everyone applies the same provider build.
+infra/*.tfstate
+infra/*.tfstate.*
+infra/terraform.tfvars
+!infra/terraform.tfvars.example
+infra/*.tfplan
