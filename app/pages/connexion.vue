@@ -181,7 +181,7 @@ async function debugLogin() {
       <!-- Step 1: Google, or ask for an identifier -->
       <template v-if="step === 'identifier'">
         <a
-          href="/auth/google"
+          href="/auth/google?state=member"
           class="w-full inline-flex items-center justify-center gap-3 px-6 py-3.5 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 font-medium text-gray-700"
         >
           <svg class="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true">

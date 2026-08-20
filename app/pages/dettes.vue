@@ -413,7 +413,7 @@ async function openPreview(name: string) {
           </p>
         </div>
         <a
-          href="/auth/google"
+          href="/auth/google?state=admin"
           class="inline-flex items-center gap-3 px-6 py-3 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 font-medium text-gray-700"
         >
           <svg class="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true">
