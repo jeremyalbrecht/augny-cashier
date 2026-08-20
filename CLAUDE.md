@@ -45,6 +45,8 @@ The frontend has a matching client-side carve-out in `app/middleware/token.globa
 
 Rate limiting keys on a hash of the raw input (`magic_requests`), not the resolved player, so probing licence numbers that match nobody still costs quota.
 
+**One OAuth callback, two landing pages.** `/auth/google` is shared by `/connexion` (member) and `/dettes` (admin) — both are reachable from the same host (e.g. the main domain's `/mon-compte` directly), so the Host header alone can't say which one the user started from. Each "Se connecter avec Google" link instead sets `?state=member` / `?state=admin`, which `nuxt-auth-utils` forwards to Google and back untouched; `server/routes/auth/google.get.ts` reads it back off the callback request to pick `/mon-compte` vs `/dettes`. Falls back to the Host-header check only for a link with no `state` at all.
+
 ### An e-mail is an account, not a person
 
 Several players share one address — a parent registers themselves and their children under it. In the live roster: **90 players, 82 distinct addresses, 7 shared** (one covering three players).
