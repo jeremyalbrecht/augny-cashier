@@ -18,7 +18,7 @@ const NOW = 1_700_000_000_000;
 
 function row(overrides: Partial<MagicCodeRow> = {}): MagicCodeRow {
   return {
-    id: 1,
+    id: "row-1",
     code_hash: hash("123456"),
     token_hash: hash("tok"),
     expires_at: NOW + CODE_TTL_MS,

@@ -1,5 +1,5 @@
 import { getQuery, sendRedirect } from "h3";
-import { d1Query, d1Execute } from "#server/utils/d1";
+import { fsQuery, fsPatch } from "#server/utils/firestore";
 import { loadRoster } from "#server/utils/require-member";
 import { findPlayerByEmail } from "#server/utils/roster";
 import { hash, checkConsumable, type MagicCodeRow } from "#server/utils/magic-code";
@@ -37,16 +37,16 @@ export default defineEventHandler(async (event) => {
   }
 
   let row: TokenRow | undefined;
+  let updateTime: string | undefined;
   try {
-    const rows = await d1Query<TokenRow>(
-      event,
-      `SELECT id, email, code_hash, token_hash, expires_at, used_at, attempts
-         FROM magic_codes
-        WHERE token_hash = ?
-        LIMIT 1`,
-      [hash(token)],
-    );
-    row = rows[0];
+    const rows = await fsQuery<TokenRow>(event, "magic_codes", {
+      where: [{ field: "token_hash", op: "EQUAL", value: hash(token) }],
+      limit: 1,
+    });
+    if (rows[0]) {
+      row = { ...rows[0].fields, id: rows[0].id };
+      updateTime = rows[0].updateTime;
+    }
   } catch (e) {
     console.error("[magic] token lookup failed:", e);
     return sendRedirect(event, "/connexion?error=lien-expire");
@@ -71,14 +71,10 @@ export default defineEventHandler(async (event) => {
       return sendRedirect(event, "/connexion?error=lien-expire");
     }
   } else {
-    // First use — consume atomically. `used_at IS NULL` in the WHERE clause is
-    // what makes the claim race-free when two requests arrive together.
-    const changed = await d1Execute(
-      event,
-      "UPDATE magic_codes SET used_at = ? WHERE id = ? AND used_at IS NULL",
-      [now, row.id],
-    );
-    if (changed !== 1) {
+    // First use — consume atomically. The `ifUpdateTime` precondition is what
+    // makes the claim race-free when two requests arrive together.
+    const changed = await fsPatch(event, "magic_codes", row.id, { used_at: now }, { ifUpdateTime: updateTime });
+    if (!changed) {
       // Lost the race to a concurrent request (typically the mail client's
       // prefetch landing microseconds earlier). That is exactly the case the
       // grace window exists for, so let it through.

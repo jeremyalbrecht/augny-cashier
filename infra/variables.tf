@@ -1,8 +1,3 @@
-variable "cloudflare_account_id" {
-  description = "Cloudflare account ID that owns the D1 database."
-  type        = string
-}
-
 variable "cloudflare_zone_id" {
   description = "Zone ID for the club domain."
   type        = string
@@ -32,8 +27,29 @@ variable "azure_swa_hostname" {
   type        = string
 }
 
-variable "d1_database_name" {
-  description = "Name of the D1 database holding magic codes and push subscriptions."
+variable "google_project_id" {
+  description = <<-EOT
+    GCP project holding the Firestore database. Same project as the service
+    account already used for Sheets access (NUXT_SA) — read its "project_id"
+    field to find this value.
+  EOT
   type        = string
-  default     = "augny-cashier-members"
+}
+
+variable "firestore_location" {
+  description = <<-EOT
+    Firestore location — a region or multi-region, e.g. "eur3" (Europe) or
+    "eur3"/"nam5". Cannot be changed after the database is created.
+  EOT
+  type        = string
+  default     = "eur3"
+}
+
+variable "service_account_email" {
+  description = <<-EOT
+    E-mail of the service account the app runs as (the one whose key is
+    base64-encoded into NUXT_SA). Granted roles/datastore.user on the project
+    so the app can read/write Firestore.
+  EOT
+  type        = string
 }

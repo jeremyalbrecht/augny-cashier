@@ -2,7 +2,7 @@ import { createHash, randomInt, randomBytes, timingSafeEqual } from "node:crypto
 
 // Magic-link code generation and validation rules.
 //
-// Pure — no I/O, no D1 — so the security-relevant rules (expiry, single use,
+// Pure — no I/O, no Firestore — so the security-relevant rules (expiry, single use,
 // attempt limit) are unit-testable in isolation, same contract as debts.ts.
 
 /** How long a code / link stays valid. Short, because the e-mail arrives in
@@ -19,7 +19,7 @@ export const RATE_WINDOW_MS = 60 * 60 * 1000;
 
 /** The subset of a `magic_codes` row the validation rules care about. */
 export interface MagicCodeRow {
-  id: number;
+  id: string;
   code_hash: string;
   token_hash: string;
   expires_at: number;

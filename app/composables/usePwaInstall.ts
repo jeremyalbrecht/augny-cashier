@@ -20,13 +20,16 @@
 //                    menu / File > Add to Dock on Mac).
 //
 // Push notifications are the concrete reason to install on Safari (the API
-// doesn't exist outside standalone mode), so the banner leans on that.
+// doesn't exist outside standalone mode), so the modal leans on that.
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 
+// Per-session, not localStorage: this is the primary funnel into push (see
+// usePushNotifications' own modal), so "not now" should mean "not this visit",
+// not "never ask again" — mirrors the push modal's dismissal.
 const DISMISS_KEY = "pwa-install-dismissed";
 
 function isIOS(): boolean {
@@ -81,7 +84,7 @@ export function usePwaInstall() {
 
   function dismiss() {
     dismissed.value = true;
-    localStorage.setItem(DISMISS_KEY, "1");
+    sessionStorage.setItem(DISMISS_KEY, "1");
   }
 
   onMounted(() => {
@@ -89,7 +92,7 @@ export function usePwaInstall() {
     if (isIOS()) platform.value = "ios";
     else if (isSafari()) platform.value = "mac-safari";
     else platform.value = "chromium";
-    dismissed.value = localStorage.getItem(DISMISS_KEY) === "1";
+    dismissed.value = sessionStorage.getItem(DISMISS_KEY) === "1";
 
     window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
     window.addEventListener("appinstalled", onAppInstalled);
@@ -101,17 +104,17 @@ export function usePwaInstall() {
   });
 
   /**
-   * Whether the incentive banner is worth showing at all: not already
-   * installed, not dismissed, and either Safari (manual instructions always
-   * apply) or Chromium with a captured prompt. Chromium browsers that never
-   * fire the event (already installed some other way, or genuinely
-   * unsupported) correctly get no banner.
+   * Whether the incentive modal is worth showing at all: not already
+   * installed, not dismissed this session, and either Safari (manual
+   * instructions always apply) or Chromium with a captured prompt. Chromium
+   * browsers that never fire the event (already installed some other way, or
+   * genuinely unsupported) correctly get nothing.
    */
-  const showBanner = computed(() => {
+  const showModal = computed(() => {
     if (isStandalone.value || dismissed.value) return false;
     if (platform.value === "ios" || platform.value === "mac-safari") return true;
     return canInstall.value;
   });
 
-  return { isStandalone, canInstall, platform, showBanner, promptInstall, dismiss };
+  return { isStandalone, canInstall, platform, showModal, promptInstall, dismiss };
 }

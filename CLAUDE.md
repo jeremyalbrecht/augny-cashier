@@ -6,7 +6,7 @@ Nuxt 4 app for Augny Badminton's club finances:
 - **Admin dashboard** (`/dettes`) — treasurer view: balances, payments, quarterly recap e-mails, payment reminders.
 - **Espace adhérent** (`/mon-compte`, `/connexion`) — a member's own view of their balance, tournaments and past recaps, plus web-push reminders. Served at `compte.augny-badminton.fr`.
 
-Business data lives in the Google Sheet **"Dettes adhérents 25/26"** (accessed via service account). Machine-generated auth state (magic codes, push subscriptions, reminder log) lives in **Cloudflare D1** — see "Storage split" below.
+Business data lives in the Google Sheet **"Dettes adhérents 25/26"** (accessed via service account). Machine-generated auth state (magic codes, push subscriptions, reminder log) lives in **Google Cloud Firestore** — see "Storage split" below.
 
 ## Commands
 
@@ -28,7 +28,6 @@ The most non-obvious thing about the codebase. Three completely separate auth me
 | Shared X-Token | Cashier (`/`, `/api/players`, `/api/prices`, `/api/push`, `/api/balance/[name]`, `/api/comitee`) | `X-Token` header or `?token=` query → cookie. Same token for everyone on the gym tablet. | `server/middleware/auth.ts` enforces. `runtimeConfig.token` = expected value. |
 | Google OAuth + allowlist | Admin (`/dettes`, `/api/debts*`, `/api/payments`, `/api/send-summary*`, `/api/relances`) | Sign-in via `/auth/google`, session cookie. Email must appear in the `Comité` sheet's column A. | `requireAdmin()` in `server/utils/require-admin.ts` (60s in-memory cache of the allowlist). |
 | Google OAuth **or** magic link + roster | Member (`/mon-compte`, `/api/member/*`) | Google sign-in, or a 6-digit code / one-tap link e-mailed via `/api/member/magic/*`. Email must match a `Joueurs` **Email** cell. | `requireMember()` in `server/utils/require-member.ts` (60s roster cache). Identifier resolution in `server/utils/roster.ts`. |
-| None (public) | `/pay/[name]` (HelloAsso payment redirect) | No token, no session — deliberately, since it's clicked from a member's personal e-mail. Sensitivity is capped by design: the amount is always read server-side from the member's real balance, never taken from the URL/query, so the worst case is someone pays off another member's debt. | Lives at `server/routes/pay/[name].get.ts`, **outside `/api`**, so it isn't touched by the X-Token middleware at all (same trick `server/routes/auth/google.get.ts` uses). |
 
 **To add a new endpoint, decide which tier it belongs to**:
 
@@ -75,19 +74,25 @@ It's `NUXT_PUBLIC_*` because both the browser (to render the form) and the serve
 
 ## Storage split
 
-Google Sheets stays the human-editable business ledger. Cloudflare D1 holds machine-generated throwaway state that needs TTLs and atomic single-use semantics — things an append-only sheet is bad at, and that nobody would ever want to read by hand.
+Google Sheets stays the human-editable business ledger. Cloudflare **used to** hold machine-generated throwaway state in D1; that moved to **Google Cloud Firestore** (Native mode) because a Cloudflare API token has no way to scope below "every D1 database in the account," while Firestore reuses the SAME service account already scoped to just this app's Sheets (`NUXT_SA`) — no separate broad-scope credential to protect.
 
 | Data | Where | Why |
 |---|---|---|
 | Joueurs, Tarifs, Dettes, Tournois, Paiements, Envois, Data | Google Sheets | The treasurer edits these by hand. |
-| `magic_codes`, `magic_requests`, `push_subscriptions`, `reminders_sent` | Cloudflare D1 | Needs expiry and atomic consume; never human-edited. |
+| `magic_codes`, `magic_requests`, `push_subscriptions`, `reminders_sent` | Firestore (Native mode) | Needs expiry and atomic consume; never human-edited. |
 | Sessions | **Nowhere** | `nuxt-auth-utils` sessions are sealed cookies. "Stay logged in" is `runtimeConfig.session.maxAge` (60 days), not a table. |
 
-The app runs on Azure Static Web Apps, so there is **no Workers binding** — D1 is reached over its REST API via `server/utils/d1.ts`. The ~100-200 ms round-trip is fine because nothing here is hot: magic codes are verified about once a month per member, and subscriptions are read only when sending pushes.
+The app runs on Azure Static Web Apps, so Firestore is reached over its REST API via `server/utils/firestore.ts` (using `NUXT_SA`'s access token, scope `https://www.googleapis.com/auth/datastore`), not the `@google-cloud/firestore` SDK. The ~100-200 ms round-trip is fine because nothing here is hot: magic codes are verified about once a month per member, and subscriptions are read only when sending pushes.
+
+Free-tier Firestore does **not** support TTL-based auto-deletion (that needs billing enabled) — not a regression versus D1, which never had server-side TTL either. Expiry is enforced in application code (`magic-code.ts`'s `checkConsumable`), and cleanup is best-effort delete-on-write in `request.post.ts`'s `pruneExpired`. Single-use consumption (`magic_codes.used_at`) is race-free via Firestore's `currentDocument.updateTime` precondition — a compare-and-swap, the equivalent of D1's `WHERE used_at IS NULL` guard.
 
 `reminders_sent` deliberately does **not** live in the `Envois` sheet: that sheet is the invoice ledger read by the FIFO unpaid-invoice walk in `debts.ts`, and reminder rows there would be counted as invoices and corrupt every balance.
 
-Infrastructure is Terraform in `infra/` (Cloudflare provider v5 — note `rules` is a list *attribute*, written with `=`, not a repeated block). Schema in `infra/schema.sql`, applied with `wrangler d1 execute`; Terraform has no resource for that. The runtime D1 API token is created by hand on purpose — `cloudflare_api_token` would write the secret into state.
+Infrastructure is Terraform in `infra/` (Cloudflare provider v5 for the `compte.<domain>` DNS record, plus the Google provider for Firestore). `infra/firestore.tf` creates the database, enables the API, grants the app's existing service account `roles/datastore.user`, and declares the composite indexes the app's queries need (Firestore doesn't auto-build an index for an equality filter combined with an order/range on a different field). That IAM grant is project-wide — Google has no finer "this database only" scope either — acceptable because the GCP project is dedicated to this app.
+
+The `compte.<domain>` root sends visitors to `/mon-compte` instead of the cashier page, via `app/middleware/member-host.global.ts` — a **client-side** redirect, deliberately not a Cloudflare Transform Rule (there used to be one, `infra/rewrite.tf`) or a Nitro server middleware. Neither of those can work here: the app is `ssr: false`, so every response is an identical empty shell (`window.__NUXT__ = {}`, no rendered content or route info) — Vue Router's initial route comes entirely from the browser's own `window.location`, which a server- or edge-side path rewrite changes for the *origin* but not for the browser, so it has zero effect on which page mounts. Only code that runs in the browser can pick a different route. The Cloudflare Transform Rule was also independently broken on its own terms: Azure's CNAME-based custom-domain validation needs the DNS record to resolve literally to the SWA hostname, which a Cloudflare-proxied record doesn't do — proxying and a validated custom domain are mutually exclusive on the free plan, and the rewrite only ever ran on proxied traffic. DNS (`infra/dns.tf`) is now a plain, unproxied CNAME.
+
+`member-host.global.ts` must alphabetically sort before `token.global.ts` (both are global middleware, and Nuxt runs them in filename order) — it redirects `/` on the member host to `/mon-compte` before the token middleware gets a chance to 401 the unauthenticated root path.
 
 ## Web push
 
@@ -106,19 +111,6 @@ So a member without a `push_subscriptions` row gets **nothing**. `sendPushToPlay
 Dead endpoints (404/410) are deleted on send — otherwise they accumulate forever.
 
 `/auth/magic` has a 5-minute `REUSE_GRACE_MS` window: mail scanners (Outlook SafeLinks, antivirus gateways) prefetch links, and strict single-use would burn the token before the member ever taps it. The typed-code path stays strictly single-use.
-
-## HelloAsso payment integration
-
-Members can pay their debt by card via HelloAsso (free for non-profits) instead of bank transfer. Two entry points, one mechanism:
-
-- The quarterly recap email (`server/utils/email-template.ts`) has a "💳 Payer par CB (HelloAsso)" button next to the RIB link.
-- The cashier screen (`app/pages/index.vue`) shows the same button above the "Solde actuel" badge once a player with a positive balance is selected.
-
-Both link to `/pay/[name]` (`server/routes/pay/[name].get.ts`), which looks up the member's live balance, calls the HelloAsso Checkout API (`server/utils/helloasso.ts`) to mint a **checkout-intent**, and 302-redirects there. This indirection exists because a checkout-intent's `redirectUrl` is only valid for **15 minutes** — it can't be embedded directly in an email sent hours or days before it's opened, so the link always points at our own stable URL, which mints a fresh intent at click time.
-
-`server/utils/helloasso.ts` handles OAuth2 `client_credentials` auth against HelloAsso (access token cached in-memory, ~30 min TTL, re-fetched on expiry — no refresh-token juggling) and the `POST /v5/organizations/{slug}/checkout-intents` call.
-
-**Not implemented**: reconciling completed HelloAsso payments back into the `Paiements` sheet. This integration only makes paying easier — it doesn't mark a debt as paid. A treasurer still needs to notice the HelloAsso payment and record it (or a future change could add a webhook for this).
 
 ## Where the business rules live
 
@@ -181,20 +173,15 @@ A partial failure here is recoverable: if writes 2 or 3 fail, you can manually a
 `runtimeConfig` keys (see `nuxt.config.ts`) → env vars:
 
 - `NUXT_TOKEN` — shared cashier secret (`token`)
-- `NUXT_SA` — base64-encoded service-account JSON (`sa`)
+- `NUXT_SA` — base64-encoded service-account JSON (`sa`). Used for both Sheets **and Firestore** — the same service account needs `roles/datastore.user` on the GCP project (granted by `infra/firestore.tf`) in addition to whatever gives it Sheets access.
 - `NUXT_SESSION_PASSWORD` — `nuxt-auth-utils` session cookie key (32+ chars; `openssl rand -hex 32`)
 - `NUXT_OAUTH_GOOGLE_CLIENT_ID` / `NUXT_OAUTH_GOOGLE_CLIENT_SECRET` — Google OAuth web client; redirect URI is `<origin>/auth/google`
 - `NUXT_SMTP_USER` / `NUXT_SMTP_PASSWORD` — Gmail app password
 - `GOOGLE_SHEET_ID` — spreadsheet ID (plain env, not runtimeConfig)
-- `NUXT_CLOUDFLARE_ACCOUNT_ID` / `NUXT_CLOUDFLARE_API_TOKEN` / `NUXT_CLOUDFLARE_D1_DATABASE_ID` — D1 REST access (`cloudflare.*`)
 - `NUXT_VAPID_PUBLIC_KEY` / `NUXT_VAPID_PRIVATE_KEY` / `NUXT_VAPID_SUBJECT` — web push (`vapid.*`); generate with `npx web-push generate-vapid-keys`
 - `NUXT_PUBLIC_VAPID_PUBLIC_KEY` — same public key, exposed to the browser so it can subscribe
 
-Note: the GitHub Actions workflow only passes `GOOGLE_SHEET_ID`, `NUXT_SA` and `NUXT_TOKEN`. Everything else (OAuth, session password, SMTP, Cloudflare, VAPID) lives in the **Azure Portal app settings** — add new secrets there, not to the workflow.
-- `NUXT_HELLOASSO_CLIENT_ID` / `NUXT_HELLOASSO_CLIENT_SECRET` — HelloAsso API client (`helloasso.clientId`/`clientSecret`). **Not yet provisioned** — create a HelloAsso org (sandbox first: [helloasso-sandbox.com](https://www.helloasso-sandbox.com)), then generate an API client from its back office (Réglages → API) to get these.
-- `NUXT_HELLOASSO_SANDBOX` — set to `"true"` to hit `api.helloasso-sandbox.com` instead of `api.helloasso.com` (`helloasso.sandbox`). Leave unset/`"false"` in production.
-- `HELLOASSO_ORGANIZATION_SLUG` — the club's HelloAsso organization slug (plain env, matches the `GOOGLE_SHEET_ID` convention) — visible in the URL of the org's HelloAsso back office, e.g. `augny-badminton` in `helloasso.com/associations/augny-badminton`.
-- `NUXT_PUBLIC_SITE_URL` — absolute origin of this app (e.g. `https://cashier.augny-badminton.fr`), used to build the `/pay/[name]` link inside recap e-mails (`publicSiteUrl`). Without it, the payment button is simply omitted from the e-mail (the cashier-screen button doesn't need it — it uses a relative URL). If unset, `/pay/[name]` itself still falls back to the request's own host for its HelloAsso `backUrl`/`errorUrl`/`returnUrl`.
+Note: the GitHub Actions workflow only passes `GOOGLE_SHEET_ID`, `NUXT_SA` and `NUXT_TOKEN`. Everything else (OAuth, session password, SMTP, VAPID) lives in the **Azure Portal app settings** — add new secrets there, not to the workflow.
 
 ## Tests
 

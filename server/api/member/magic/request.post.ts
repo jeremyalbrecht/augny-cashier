@@ -1,5 +1,5 @@
 import { readBody } from "h3";
-import { d1Query, d1Execute } from "#server/utils/d1";
+import { fsQuery, fsCreate, fsDeleteWhere } from "#server/utils/firestore";
 import { loadRoster } from "#server/utils/require-member";
 import { findPlayerByIdentifier } from "#server/utils/roster";
 import { renderMagicLinkEmail } from "#server/utils/email-template";
@@ -53,12 +53,12 @@ interface RequestBody {
  *
  * Best-effort throughout: a failed cleanup must never cost someone their login.
  */
-async function pruneExpired(event: Parameters<typeof d1Execute>[0], now: number): Promise<void> {
+async function pruneExpired(event: Parameters<typeof fsQuery>[0], now: number): Promise<void> {
   const RETENTION_MARGIN_MS = 5 * 60 * 1000;
   try {
-    await d1Execute(event, "DELETE FROM magic_codes WHERE expires_at < ?", [now]);
-    await d1Execute(event, "DELETE FROM magic_requests WHERE created_at < ?", [
-      now - RATE_WINDOW_MS - RETENTION_MARGIN_MS,
+    await fsDeleteWhere(event, "magic_codes", [{ field: "expires_at", op: "LESS_THAN", value: now }]);
+    await fsDeleteWhere(event, "magic_requests", [
+      { field: "created_at", op: "LESS_THAN", value: now - RATE_WINDOW_MS - RETENTION_MARGIN_MS },
     ]);
   } catch (e) {
     console.error("[magic] cleanup of expired rows failed:", e);
@@ -77,30 +77,37 @@ export default defineEventHandler(async (event) => {
   const now = Date.now();
 
   try {
-    const recent = await d1Query<{ created_at: number }>(
-      event,
-      "SELECT created_at FROM magic_requests WHERE identifier_hash = ? AND created_at > ?",
-      [identifierHash, now - RATE_WINDOW_MS],
-    );
-    if (!withinRateLimit(recent.map((r) => r.created_at), now)) {
+    const recent = await fsQuery<{ created_at: number }>(event, "magic_requests", {
+      where: [
+        { field: "identifier_hash", op: "EQUAL", value: identifierHash },
+        { field: "created_at", op: "GREATER_THAN", value: now - RATE_WINDOW_MS },
+      ],
+    });
+    if (!withinRateLimit(recent.map((r) => r.fields.created_at), now)) {
       // Silently drop — a rate-limit message would itself confirm that someone
       // has been probing this identifier.
       console.warn("[magic] rate limit hit for an identifier");
       return GENERIC_RESPONSE;
     }
-    await d1Execute(
-      event,
-      "INSERT INTO magic_requests (identifier_hash, created_at) VALUES (?, ?)",
-      [identifierHash, now],
-    );
+    await fsCreate(event, "magic_requests", { identifier_hash: identifierHash, created_at: now });
   } catch (e) {
-    // A D1 outage must not become a login outage; log and carry on without
+    // A Firestore outage must not become a login outage; log and carry on without
     // rate limiting rather than locking every member out.
     console.error("[magic] rate-limit check failed:", e);
   }
 
-  const roster = await loadRoster(event);
-  const player = findPlayerByIdentifier(roster, identifier);
+  // Everything else in this handler fails open (log and return the generic
+  // response) so an infra outage can never behave differently from "unknown
+  // identifier" — an unguarded throw here would turn into a 500, which is
+  // itself a distinguishable signal on top of being a broken login.
+  let player: ReturnType<typeof findPlayerByIdentifier>;
+  try {
+    const roster = await loadRoster(event);
+    player = findPlayerByIdentifier(roster, identifier);
+  } catch (e) {
+    console.error("[magic] failed to load roster:", e);
+    return GENERIC_RESPONSE;
+  }
 
   if (!player) {
     return GENERIC_RESPONSE;
@@ -123,12 +130,15 @@ export default defineEventHandler(async (event) => {
   const token = generateToken();
 
   try {
-    await d1Execute(
-      event,
-      `INSERT INTO magic_codes (email, code_hash, token_hash, expires_at, used_at, attempts, created_at)
-       VALUES (?, ?, ?, ?, NULL, 0, ?)`,
-      [player.email, hash(code), hash(token), expiryFrom(now), now],
-    );
+    await fsCreate(event, "magic_codes", {
+      email: player.email,
+      code_hash: hash(code),
+      token_hash: hash(token),
+      expires_at: expiryFrom(now),
+      used_at: null,
+      attempts: 0,
+      created_at: now,
+    });
   } catch (e) {
     console.error("[magic] failed to store code:", e);
     return GENERIC_RESPONSE;

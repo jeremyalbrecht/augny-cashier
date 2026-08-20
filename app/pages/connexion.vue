@@ -29,6 +29,12 @@ const identifier = ref("");
 const code = ref("");
 const submitting = ref(false);
 const codeError = ref<string | null>(null);
+// A genuine transport/server failure — distinct from the endpoint's normal
+// "ok" response, which it returns unconditionally by design (see the
+// anti-enumeration contract in the server handler) whether or not an e-mail
+// actually went out. This only fires when the request never got a real
+// response at all, so it can't leak anything about the identifier.
+const requestFailed = ref(false);
 
 const RESEND_COOLDOWN_S = 60;
 const cooldown = ref(0);
@@ -53,19 +59,33 @@ async function requestCode() {
   if (submitting.value || !identifier.value.trim()) return;
   submitting.value = true;
   codeError.value = null;
+  requestFailed.value = false;
   try {
-    // Always resolves — the endpoint returns the same body whatever happened.
+    // Resolves with the same body whatever the identifier resolved to — the
+    // server never lets that outcome distinguish a response. A thrown error
+    // here means the request never completed at all (network down, an
+    // unrelated server crash), which is safe to surface: it says nothing
+    // about the identifier, only that nothing happened yet.
     await $fetch("/api/member/magic/request", {
       method: "POST",
       body: { identifier: identifier.value.trim() },
     });
-  } catch {
-    // Even a transport error must not hint at the outcome; the user can retry.
-  } finally {
-    submitting.value = false;
     step.value = "code";
     startCooldown();
+  } catch {
+    requestFailed.value = true;
+  } finally {
+    submitting.value = false;
   }
+}
+
+// The e-mail renders the code letter-spaced ("1 2 3 4 5 6") for readability,
+// so a copy-paste carries spaces straight into the field. Strip everything
+// but digits as the user types or pastes, rather than relying on maxlength
+// (which truncates a pasted spaced code to its first few characters instead
+// of collapsing it).
+function onCodeInput(e: Event) {
+  code.value = (e.target as HTMLInputElement).value.replace(/\D/g, "").slice(0, 6);
 }
 
 async function submitCode() {
@@ -136,13 +156,19 @@ async function debugLogin() {
         v-if="oauthFailed"
         class="mb-5 px-4 py-3 rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-sm text-red-800 dark:text-red-200"
       >
-        La connexion Google a échoué. Réessaie.
+        La connexion Google a échoué. Es-tu sûr que l'email utilisé auprès de FFBad est bien l'email Google? Essaie plutôt d'entrer ton numéro de licence dans le champ ci-dessous.
       </div>
       <div
         v-if="linkExpired"
         class="mb-5 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 text-sm text-amber-900 dark:text-amber-200"
       >
         Ce lien de connexion n'est plus valable. Demande-en un nouveau ci-dessous.
+      </div>
+      <div
+        v-if="requestFailed"
+        class="mb-5 px-4 py-3 rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-sm text-red-800 dark:text-red-200"
+      >
+        La demande n'a pas pu être envoyée. Vérifie ta connexion et réessaie.
       </div>
 
       <div class="text-center mb-8">
@@ -244,13 +270,13 @@ async function debugLogin() {
           </label>
           <input
             id="code"
-            v-model="code"
+            :value="code"
             type="text"
             inputmode="numeric"
             autocomplete="one-time-code"
-            maxlength="6"
             placeholder="000000"
             class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-center text-2xl tracking-[0.4em] tabular-nums focus:ring-blue-500 focus:border-blue-500"
+            @input="onCodeInput"
           >
           <p v-if="codeError" class="mt-2 text-sm text-red-600 dark:text-red-400">
             {{ codeError }}

@@ -1,7 +1,7 @@
 // Who deserves a payment reminder.
 //
 // Pure over already-fetched data — same contract as debts.ts — so the rules are
-// unit-testable without D1 or Sheets.
+// unit-testable without Firestore or Sheets.
 //
 // The rule: a member is a candidate when at least one invoice the club sent
 // them is still unpaid and is old enough to have been reasonably actioned, and

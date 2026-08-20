@@ -4,14 +4,11 @@
 // nuxt-auth-utils picks up credentials from NUXT_OAUTH_GOOGLE_CLIENT_ID and
 // NUXT_OAUTH_GOOGLE_CLIENT_SECRET. Session is encrypted with NUXT_SESSION_PASSWORD.
 
-import { getRequestHost } from "h3";
+import { isMemberHost } from "#server/utils/host";
 
-/** The member area is served from compte.<domain>; the treasurer dashboard from
- *  the main host. Both share this one callback, so pick the landing page from
- *  the host the browser actually came in on. */
-function isMemberHost(event: Parameters<typeof getRequestHost>[0]): boolean {
-  return getRequestHost(event).toLowerCase().startsWith("compte.");
-}
+// Both the member area and the treasurer dashboard share this one OAuth
+// callback, so the landing page is picked from the host the browser actually
+// came in on — see isMemberHost.
 
 export default defineOAuthGoogleEventHandler({
   config: {

@@ -1,7 +1,7 @@
 import { readBody } from "h3";
 import { loadAllBalances } from "#server/utils/load-debts";
 import { requireAdmin } from "#server/utils/require-admin";
-import { d1Query, d1Execute, isD1Configured } from "#server/utils/d1";
+import { fsQuery, fsCreateMany, isFirestoreConfigured } from "#server/utils/firestore";
 import { sendPushToPlayers, playersWithSubscriptions } from "#server/utils/push";
 import {
   selectReminderCandidates,
@@ -25,17 +25,20 @@ interface RelancesBody {
   names?: string[];
 }
 
-async function loadReminderLog(event: Parameters<typeof d1Query>[0]): Promise<ReminderLog> {
+async function loadReminderLog(event: Parameters<typeof fsQuery>[0]): Promise<ReminderLog> {
   const log: ReminderLog = new Map();
-  if (!isD1Configured(event)) return log;
+  if (!isFirestoreConfigured(event)) return log;
   try {
     const since = Date.now() - REMINDER_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
-    const rows = await d1Query<{ player_name: string; sent_at: number }>(
-      event,
-      "SELECT player_name, MAX(sent_at) AS sent_at FROM reminders_sent WHERE sent_at > ? GROUP BY player_name",
-      [since],
-    );
-    for (const r of rows) log.set(r.player_name, r.sent_at);
+    const rows = await fsQuery<{ player_name: string; sent_at: number }>(event, "reminders_sent", {
+      where: [{ field: "sent_at", op: "GREATER_THAN", value: since }],
+    });
+    // No GROUP BY/MAX in Firestore — reduce client-side. Volume here is
+    // trivial (a handful of reminders per week for ~90 members).
+    for (const r of rows) {
+      const current = log.get(r.fields.player_name);
+      if (current == null || r.fields.sent_at > current) log.set(r.fields.player_name, r.fields.sent_at);
+    }
   } catch (e) {
     // Without the log we'd re-notify everyone. Failing closed (empty log) would
     // spam members, so surface the error to the caller instead.
@@ -79,8 +82,8 @@ export default defineEventHandler(async (event) => {
   }
 
   const result = await sendPushToPlayers(event, names, {
-    title: "Augny Badminton",
-    body: "Tu as un récap de dettes en attente de règlement. Ouvre ton espace adhérent pour le détail.",
+    title: "Dettes non réglées !",
+    body: "Ton solde (tournois + achats) au club est toujours en attente de réglement. Vérifie tes emails ou l'espace adhérent pour le détail.",
     url: "/mon-compte",
     tag: "augny-relance",
   });
@@ -92,12 +95,10 @@ export default defineEventHandler(async (event) => {
   if (notified.length > 0) {
     const now = Date.now();
     try {
-      const values = notified.map(() => "(?, ?)").join(", ");
-      const params = notified.flatMap((n) => [n, now]);
-      await d1Execute(
+      await fsCreateMany(
         event,
-        `INSERT INTO reminders_sent (player_name, sent_at) VALUES ${values}`,
-        params,
+        "reminders_sent",
+        notified.map((n) => ({ player_name: n, sent_at: now })),
       );
     } catch (e) {
       console.error("[relances] failed to record reminders:", e);

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { PlayerBalance } from "#server/utils/debts";
+import { parseSheetDate, type PlayerBalance } from "#server/utils/debts";
 
 // Espace adhérent — a member's own view of what they owe.
 //
@@ -95,9 +95,9 @@ const {
 const {
   isStandalone,
   platform: pwaPlatform,
-  showBanner: showInstallBanner,
+  showModal: showInstallModal,
   promptInstall,
-  dismiss: dismissInstallBanner,
+  dismiss: dismissInstallModal,
 } = usePwaInstall();
 
 // Once the app is installed, push is the whole point of installing (there's
@@ -184,8 +184,123 @@ function previousDebtsNet(p: PlayerBalance): number {
   return p.invoicesTotal - p.paymentsTotalAll;
 }
 
+// --- Achats / Tournois history (full season, two separate sections) ---
+//
+// `lines`/`tournaments` are cutoff-filtered (current period only); `allLines`/
+// `allTournaments` are the same rows unfiltered, back to the start of the
+// season. Each gets its own section (purchases and tournaments are different
+// enough — item vs. result, single price vs. offered/originalDue — that
+// merging them into one list reads worse than two clearly-labelled ones), but
+// both share the same newest-first order, cutoff divider, and pagination.
+type DividerRow = { kind: "divider" };
+type PurchaseRow = { kind: "purchase"; date: string; item: string; price: number; sortKey: number | null };
+type TournamentRow = {
+  kind: "tournament";
+  date: string;
+  name: string;
+  place?: string;
+  due: number;
+  originalDue: number;
+  offered: boolean;
+  win: boolean;
+  finalist: boolean;
+  sortKey: number | null;
+};
+
+/** Null for an unparseable date. Kept separate from a numeric fallback so the
+ *  comparator below can sort these last regardless of sort direction. */
+function dateKey(date: string): number | null {
+  return parseSheetDate(date)?.getTime() ?? null;
+}
+
+/** Newest first, unparseable dates always last. */
+function byDateDesc<T extends { sortKey: number | null }>(a: T, b: T): number {
+  if (a.sortKey == null && b.sortKey == null) return 0;
+  if (a.sortKey == null) return 1;
+  if (b.sortKey == null) return -1;
+  return b.sortKey - a.sortKey;
+}
+
+const cutoffTime = computed(() => {
+  const iso = me.value?.cutoffDate;
+  return iso ? new Date(iso).getTime() : null;
+});
+
+/** Sorts newest-first and inserts the cutoff divider right before the first
+ *  record that's NOT current (older than the cutoff, or of unknown date) —
+ *  or at the very end if every record is current. */
+function withDivider<T extends { sortKey: number | null }>(entries: T[]): (T | DividerRow)[] {
+  const sorted = [...entries].sort(byDateDesc);
+  const cutoff = cutoffTime.value;
+  if (cutoff == null || sorted.length === 0) return sorted;
+  const idx = sorted.findIndex((e) => e.sortKey == null || e.sortKey < cutoff);
+  const splitAt = idx === -1 ? sorted.length : idx;
+  return [...sorted.slice(0, splitAt), { kind: "divider" as const }, ...sorted.slice(splitAt)];
+}
+
+function purchaseHistory(p: PlayerBalance): (PurchaseRow | DividerRow)[] {
+  return withDivider(
+    p.allLines.map((l) => ({
+      kind: "purchase" as const,
+      date: l.date,
+      item: l.item,
+      price: l.price,
+      sortKey: dateKey(l.date),
+    })),
+  );
+}
+
+function tournamentHistory(p: PlayerBalance): (TournamentRow | DividerRow)[] {
+  return withDivider(
+    p.allTournaments.map((t) => ({
+      kind: "tournament" as const,
+      date: t.date,
+      name: t.name,
+      place: t.place,
+      due: t.due,
+      originalDue: t.originalDue,
+      offered: t.offered,
+      win: t.win,
+      finalist: t.finalist,
+      sortKey: dateKey(t.date),
+    })),
+  );
+}
+
+// Paginated 10-at-a-time, per player AND per section (a household can have
+// several players, each with their own purchases/tournaments pagination). The
+// divider counts as a row in the slice, so "10 items" can show as fewer than
+// 10 real records right around the cutoff boundary — acceptable, it's a page
+// size, not a guarantee.
+const HISTORY_PAGE_SIZE = 10;
+const historyLimits = ref<Record<string, number>>({});
+
+function historyLimit(key: string): number {
+  return historyLimits.value[key] ?? HISTORY_PAGE_SIZE;
+}
+
+function showMoreHistory(key: string) {
+  historyLimits.value[key] = historyLimit(key) + HISTORY_PAGE_SIZE;
+}
+
+function visiblePurchases(p: PlayerBalance): (PurchaseRow | DividerRow)[] {
+  return purchaseHistory(p).slice(0, historyLimit(`${p.name}:purchases`));
+}
+
+function hasMorePurchases(p: PlayerBalance): boolean {
+  return purchaseHistory(p).length > historyLimit(`${p.name}:purchases`);
+}
+
+function visibleTournaments(p: PlayerBalance): (TournamentRow | DividerRow)[] {
+  return tournamentHistory(p).slice(0, historyLimit(`${p.name}:tournaments`));
+}
+
+function hasMoreTournaments(p: PlayerBalance): boolean {
+  return tournamentHistory(p).length > historyLimit(`${p.name}:tournaments`);
+}
+
 function hasDetail(p: PlayerBalance): boolean {
-  return p.lines.length > 0 || p.tournaments.length > 0 || previousDebts(p).length > 0;
+  return p.allLines.length > 0 || p.allTournaments.length > 0 || previousDebts(p).length > 0;
 }
 </script>
 
@@ -210,6 +325,97 @@ function hasDetail(p: PlayerBalance): boolean {
         </button>
       </div>
     </header>
+
+    <!-- Blocking install incentive. Mutually exclusive with the push modal
+         below: this one only fires when NOT standalone, the push one only
+         when standalone, so they never stack. Chromium gets a one-tap
+         native prompt; Safari (iOS or Mac) gets manual steps, since
+         beforeinstallprompt never fires there. -->
+    <div
+      v-if="showInstallModal"
+      class="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-4"
+      @click.self="dismissInstallModal"
+    >
+      <div class="bg-white dark:bg-gray-900 rounded-xl w-full max-w-sm p-6 text-center shadow-xl">
+        <p class="text-4xl mb-3">🏸</p>
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-1">
+          Installe l'app Augny Badminton
+        </h2>
+        <p class="text-sm text-gray-600 dark:text-gray-400 mb-5">
+          Ton solde en un tap depuis l'écran d'accueil, sans passer par ta boîte mail: pas de risque de louper les emails + un aperçu temps réel.
+        </p>
+
+        <button
+          v-if="pwaPlatform === 'chromium'"
+          type="button"
+          class="w-full py-2.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700"
+          @click="promptInstall"
+        >
+          Installer l'app
+        </button>
+
+        <ol
+          v-else-if="pwaPlatform === 'ios'"
+          class="text-left text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-lg p-3 list-decimal list-inside space-y-1"
+        >
+          <li>Appuie sur <strong>Partager</strong> (l'icône ⬆️ en bas de Safari)</li>
+          <li>Choisis <strong>Sur l'écran d'accueil</strong></li>
+        </ol>
+
+        <ol
+          v-else-if="pwaPlatform === 'mac-safari'"
+          class="text-left text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-lg p-3 list-decimal list-inside space-y-1"
+        >
+          <li>Menu <strong>Fichier</strong> → <strong>Ajouter au Dock…</strong></li>
+        </ol>
+
+        <button
+          type="button"
+          class="w-full mt-2 py-2 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+          @click="dismissInstallModal"
+        >
+          Plus tard
+        </button>
+      </div>
+    </div>
+
+    <!-- Blocking install-time push incentive. Only reachable once the app is
+         actually installed and push is technically available (state ready) —
+         it does not fight with the needs-install / unsupported-ios copy in
+         the card below, which covers members who haven't installed yet. -->
+    <div
+      v-if="showPushModal"
+      class="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-4"
+      @click.self="dismissPushModal"
+    >
+      <div class="bg-white dark:bg-gray-900 rounded-xl w-full max-w-sm p-6 text-center shadow-xl">
+        <p class="text-4xl mb-3">🔔</p>
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-1">
+          Active les notifications
+        </h2>
+        <p class="text-sm text-gray-600 dark:text-gray-400 mb-5">
+          Bénéficie d'un rappel sur ton téléphone quand le club envoie un récap, pour ne jamais louper un paiement.
+        </p>
+        <button
+          type="button"
+          :disabled="pushBusy"
+          class="w-full py-2.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-50"
+          @click="enablePushFromModal"
+        >
+          Activer les notifications
+        </button>
+        <button
+          type="button"
+          class="w-full mt-2 py-2 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+          @click="dismissPushModal"
+        >
+          Plus tard
+        </button>
+        <p v-if="pushError" class="mt-3 text-xs text-red-600 dark:text-red-400">
+          {{ pushError }}
+        </p>
+      </div>
+    </div>
 
     <main class="max-w-screen-sm mx-auto px-4 py-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
       <!-- 1. Not signed in -->
@@ -241,8 +447,7 @@ function hasDetail(p: PlayerBalance): boolean {
         <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Adresse non reconnue</h2>
         <p class="text-gray-600 dark:text-gray-400 max-w-md">
           Tu es connecté avec <strong>{{ me.email }}</strong>, mais cette adresse n'est pas
-          rattachée à un adhérent. Contacte le comité pour la faire ajouter, ou connecte-toi
-          avec l'adresse que le club a sur sa liste.
+          rattachée à un adhérent. Vérifie que l'adresse que tu as utilisée est bien celle qui est rattachée à ton compte FFBad.
         </p>
         <button
           type="button"
@@ -267,58 +472,6 @@ function hasDetail(p: PlayerBalance): boolean {
 
       <!-- 5. The account -->
       <template v-else-if="players.length">
-        <!-- Install incentive — not installed, not dismissed. Chromium gets a
-             one-tap native prompt; Safari (iOS or Mac) gets manual steps,
-             since beforeinstallprompt never fires there. -->
-        <section
-          v-if="showInstallBanner"
-          class="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-xl p-4 mb-4"
-        >
-          <div class="flex items-start gap-3">
-            <span class="text-2xl leading-none shrink-0">🏸</span>
-            <div class="min-w-0 flex-1">
-              <p class="font-medium text-sm text-blue-900 dark:text-blue-200">
-                Installe l'app pour un accès rapide
-              </p>
-              <p class="text-xs text-blue-800/80 dark:text-blue-300/80 mt-0.5">
-                Ton solde en un tap depuis l'écran d'accueil, et les notifications de rappel.
-              </p>
-
-              <button
-                v-if="pwaPlatform === 'chromium'"
-                type="button"
-                class="mt-2.5 text-sm font-medium px-3 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700"
-                @click="promptInstall"
-              >
-                Installer l'app
-              </button>
-
-              <ol
-                v-else-if="pwaPlatform === 'ios'"
-                class="mt-2 list-decimal list-inside space-y-0.5 text-xs text-blue-900 dark:text-blue-200"
-              >
-                <li>Appuie sur <strong>Partager</strong> (l'icône ⬆️ en bas de Safari)</li>
-                <li>Choisis <strong>Sur l'écran d'accueil</strong></li>
-              </ol>
-
-              <ol
-                v-else-if="pwaPlatform === 'mac-safari'"
-                class="mt-2 list-decimal list-inside space-y-0.5 text-xs text-blue-900 dark:text-blue-200"
-              >
-                <li>Menu <strong>Fichier</strong> → <strong>Ajouter au Dock…</strong></li>
-              </ol>
-            </div>
-            <button
-              type="button"
-              class="shrink-0 text-blue-800/60 dark:text-blue-300/60 hover:text-blue-900 dark:hover:text-blue-200 text-lg leading-none"
-              aria-label="Ignorer"
-              @click="dismissInstallBanner"
-            >
-              ×
-            </button>
-          </div>
-        </section>
-
         <!-- Solde hero — the household total when the address covers several
              players, otherwise simply that player's solde. -->
         <section
@@ -474,40 +627,81 @@ function hasDetail(p: PlayerBalance): boolean {
 
             <!-- Details -->
             <div class="mt-4 space-y-3">
-              <details v-if="p.lines.length" open>
+              <details v-if="p.allLines.length" open>
                 <summary class="cursor-pointer font-medium text-sm text-gray-700 dark:text-gray-300 select-none py-1">
-                  Achats ({{ p.lines.length }})
+                  Achats ({{ p.allLines.length }})
                 </summary>
                 <ul class="mt-2 divide-y divide-gray-100 dark:divide-gray-800 text-sm">
-                  <li v-for="(l, i) in p.lines" :key="i" class="flex justify-between gap-3 py-2">
-                    <span class="text-gray-700 dark:text-gray-300 min-w-0">
-                      <span class="text-gray-400 text-xs mr-2">{{ l.date }}</span>
-                      {{ l.item }}
-                    </span>
-                    <span class="tabular-nums shrink-0" :class="l.price < 0 ? 'text-green-600' : ''">
-                      {{ Euro.format(l.price) }}
-                    </span>
+                  <li v-for="(row, i) in visiblePurchases(p)" :key="i">
+                    <div
+                      v-if="row.kind === 'divider'"
+                      class="flex items-center gap-2 py-2 text-xs font-medium text-blue-600 dark:text-blue-400"
+                    >
+                      <span class="h-px flex-1 bg-blue-200 dark:bg-blue-800" />
+                      Dette actuelle à partir d'ici
+                      <span class="h-px flex-1 bg-blue-200 dark:bg-blue-800" />
+                    </div>
+                    <div v-else class="flex justify-between gap-3 py-2">
+                      <span class="text-gray-700 dark:text-gray-300 min-w-0">
+                        <span class="text-gray-400 text-xs mr-2">{{ row.date }}</span>
+                        {{ row.item }}
+                      </span>
+                      <span class="tabular-nums shrink-0" :class="row.price < 0 ? 'text-green-600' : ''">
+                        {{ Euro.format(row.price) }}
+                      </span>
+                    </div>
                   </li>
                 </ul>
+                <button
+                  v-if="hasMorePurchases(p)"
+                  type="button"
+                  class="mt-3 w-full py-2 text-sm text-blue-600 hover:underline"
+                  @click="showMoreHistory(`${p.name}:purchases`)"
+                >
+                  Afficher plus
+                </button>
               </details>
 
-              <details v-if="p.tournaments.length">
+              <details v-if="p.allTournaments.length" open>
                 <summary class="cursor-pointer font-medium text-sm text-gray-700 dark:text-gray-300 select-none py-1">
-                  Tournois ({{ p.tournaments.length }})
+                  Tournois ({{ p.allTournaments.length }})
                 </summary>
                 <ul class="mt-2 divide-y divide-gray-100 dark:divide-gray-800 text-sm">
-                  <li v-for="(t, i) in p.tournaments" :key="i" class="flex justify-between gap-3 py-2">
-                    <span class="text-gray-700 dark:text-gray-300 min-w-0">
-                      <span class="text-gray-400 text-xs mr-2">{{ t.date }}</span>
-                      <span v-if="t.win" class="mr-1">🥇</span>
-                      <span v-if="t.finalist" class="mr-1">🥈</span>
-                      {{ t.name }}
-                      <span v-if="t.place" class="text-gray-400 text-xs ml-1">{{ t.place }}</span>
-                      <span v-if="t.offered" class="ml-1 text-xs text-green-600">🎁 offert</span>
-                    </span>
-                    <span class="tabular-nums shrink-0">{{ Euro.format(t.due) }}</span>
+                  <li v-for="(row, i) in visibleTournaments(p)" :key="i">
+                    <div
+                      v-if="row.kind === 'divider'"
+                      class="flex items-center gap-2 py-2 text-xs font-medium text-blue-600 dark:text-blue-400"
+                    >
+                      <span class="h-px flex-1 bg-blue-200 dark:bg-blue-800" />
+                      Dette actuelle à partir d'ici
+                      <span class="h-px flex-1 bg-blue-200 dark:bg-blue-800" />
+                    </div>
+                    <div v-else class="flex justify-between gap-3 py-2">
+                      <span class="text-gray-700 dark:text-gray-300 min-w-0">
+                        <span class="text-gray-400 text-xs mr-2">{{ row.date }}</span>
+                        <span v-if="row.win" class="mr-1">🥇</span>
+                        <span v-if="row.finalist" class="mr-1">🥈</span>
+                        {{ row.name }}
+                        <span v-if="row.place" class="text-gray-400 text-xs ml-1">{{ row.place }}</span>
+                        <span v-if="row.offered" class="ml-1 text-xs text-green-600">🎁 offert</span>
+                      </span>
+                      <span class="tabular-nums shrink-0">
+                        <span v-if="row.offered && row.originalDue > 0" class="text-gray-400 line-through mr-1">
+                          {{ Euro.format(row.originalDue) }}
+                        </span>
+                        {{ Euro.format(row.due) }}
+                      </span>
+                    </div>
                   </li>
                 </ul>
+                <button
+                  v-if="hasMoreTournaments(p)"
+                  type="button"
+                  class="mt-3 w-full py-2 text-sm text-blue-600 hover:underline"
+                  @click="showMoreHistory(`${p.name}:tournaments`)"
+                >
+                  Afficher plus
+                </button>
               </details>
 
               <details v-if="previousDebts(p).length">

@@ -10,7 +10,7 @@ export default defineNuxtConfig({
     ssr: false,
     app: {
       head: {
-          title: 'Augny Badminton Cashier - Enregistrement des dettes',
+          title: 'Augny Badminton - Espace adhérent',
         charset: 'utf-8',
         viewport: 'width=device-width, initial-scale=1, maximum-scale=1.0, user-scalable=0, viewport-fit=cover, interactive-widget=resizes-content',
         link: [
@@ -37,10 +37,6 @@ export default defineNuxtConfig({
         oauth: { google: { clientId: '', clientSecret: '' } },
         // SMTP (Gmail app password). Env vars: NUXT_SMTP_USER, NUXT_SMTP_PASSWORD.
         smtp: { user: '', password: '' },
-        // Cloudflare D1, reached over the REST API (the app runs on Azure, so
-        // there is no Workers binding). Holds magic codes, push subscriptions
-        // and the reminder log — see infra/schema.sql.
-        cloudflare: { accountId: '', apiToken: '', d1DatabaseId: '' },
         // Web push. Generate with: npx web-push generate-vapid-keys
         vapid: { publicKey: '', privateKey: '', subject: '' },
         public: {
@@ -58,13 +54,6 @@ export default defineNuxtConfig({
             // in any production build.
             debugAuth: false,
         },
-        // HelloAsso Checkout API client. Env vars: NUXT_HELLOASSO_CLIENT_ID,
-        // NUXT_HELLOASSO_CLIENT_SECRET, NUXT_HELLOASSO_SANDBOX ('true' to use
-        // api.helloasso-sandbox.com instead of api.helloasso.com).
-        helloasso: { clientId: '', clientSecret: '', sandbox: '' },
-        // Absolute origin used to build the /pay/[name] link in recap emails.
-        // Env var: NUXT_PUBLIC_SITE_URL (e.g. https://cashier.augny-badminton.fr)
-        publicSiteUrl: '',
     },
     postcss: {
         plugins: {

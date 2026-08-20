@@ -106,7 +106,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: "names[] required" });
   }
 
-  const { smtp, sa, publicSiteUrl } = useRuntimeConfig(event);
+  const { smtp, sa } = useRuntimeConfig(event);
   if (!smtp?.user || !smtp?.password) {
     throw createError({
       statusCode: 500,
@@ -137,7 +137,7 @@ export default defineEventHandler(async (event) => {
       results.push({ name, email: player.email, status: "skipped", reason: "Nothing owed" });
       continue;
     }
-    const html = renderRecapEmail(player, { cutoffDateLabel: cutoffStr, publicSiteUrl: publicSiteUrl as string });
+    const html = renderRecapEmail(player, { cutoffDateLabel: cutoffStr });
     try {
       await sendHtmlEmail(
         { user: smtp.user as string, password: smtp.password as string },
@@ -194,8 +194,8 @@ export default defineEventHandler(async (event) => {
   if (emailedNames.length > 0) {
     try {
       const pushResult = await sendPushToPlayers(event, emailedNames, {
-        title: "Augny Badminton",
-        body: "Ton récap de dettes vient d'être envoyé par e-mail. Ouvre ton espace adhérent pour le détail.",
+        title: "Dettes - Augny Badminton",
+        body: "Ton récap de dettes vient d'être envoyé par e-mail. Ouvre ton espace adhérent ou tes emails pour le détail.",
         url: "/mon-compte",
         tag: "augny-recap",
       });

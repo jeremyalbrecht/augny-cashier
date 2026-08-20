@@ -2,6 +2,12 @@
 // tablet secret): the treasurer dashboard and the member area both use a
 // session cookie (Google OAuth or magic link). Listed by prefix so future
 // sub-pages are exempt without edits.
+//
+// "/" itself is deliberately NOT exempt here — on the main domain it's the
+// token-gated cashier page. On the member subdomain it's redirected to
+// /mon-compte by member-host.global.ts, which (by filename, alphabetically)
+// runs before this one, so this middleware never actually sees "/" from that
+// host.
 const NON_TOKEN_ROUTE_PREFIXES = ['/dettes', '/auth/', '/mon-compte', '/connexion'];
 
 export default defineNuxtRouteMiddleware((to, from) => {

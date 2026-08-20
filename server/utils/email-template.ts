@@ -64,11 +64,6 @@ function groupDebtLines(lines: PlayerBalance["lines"]): GroupedDebt[] {
 export interface RenderEmailOptions {
   /** Cutoff date the recap covers, as DD/MM/YYYY. If set, the intro mentions it. */
   cutoffDateLabel?: string | null;
-  /**
-   * Absolute origin (e.g. https://cashier.augny-badminton.fr) used to build
-   * the HelloAsso payment link (/pay/[name]). Omitted → no payment button.
-   */
-  publicSiteUrl?: string | null;
 }
 
 const SECTION_HEADER = `font-size: 11px; font-weight: 700; color: ${NAVY}; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 10px 0;`;
@@ -137,16 +132,6 @@ export function renderRecapEmail(player: PlayerBalance, opts: RenderEmailOptions
       </td></tr>
     </table>`;
   }
-
-  const paymentLink =
-    opts.publicSiteUrl && player.total > 0
-      ? `${opts.publicSiteUrl}/pay/${encodeURIComponent(player.name)}`
-      : null;
-  const paymentButton = paymentLink
-    ? `<a href="${paymentLink}" style="display: inline-block; padding: 10px 22px; background: ${NAVY}; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 13px; margin-right: 8px;">
-        💳 Payer par CB (HelloAsso)
-      </a>`
-    : "";
 
   const debtSection = debtListItems
     ? sectionCard("🛒 Achats", debtListItems)
@@ -220,7 +205,6 @@ export function renderRecapEmail(player: PlayerBalance, opts: RenderEmailOptions
               <p style="margin: 0 0 16px 0; font-size: 32px; font-weight: 700; color: ${NAVY}; letter-spacing: -0.02em;">
                 ${formatEuro(player.total)}
               </p>
-              ${paymentButton}
               <a href="${RIB_URL}" style="display: inline-block; padding: 10px 22px; background: ${NAVY}; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 13px;">
                 💳 Télécharger le RIB
               </a>

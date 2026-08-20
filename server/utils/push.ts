@@ -1,6 +1,6 @@
 import type { H3Event } from "h3";
 import webpush from "web-push";
-import { d1Query, d1Execute, isD1Configured } from "#server/utils/d1";
+import { fsQuery, fsPatch, fsDeleteWhere, isFirestoreConfigured } from "#server/utils/firestore";
 
 // Web push delivery.
 //
@@ -32,7 +32,6 @@ export interface PushResult {
 }
 
 interface SubscriptionRow {
-  id: number;
   player_name: string;
   endpoint: string;
   p256dh: string;
@@ -64,8 +63,8 @@ export async function sendPushToPlayers(
 ): Promise<PushResult> {
   const empty: PushResult = { sent: 0, failed: 0, pruned: 0, noSubscription: [...names] };
   if (names.length === 0) return { ...empty, noSubscription: [] };
-  if (!isD1Configured(event)) {
-    console.warn("[push] D1 not configured — no notifications sent");
+  if (!isFirestoreConfigured(event)) {
+    console.warn("[push] Firestore not configured — no notifications sent");
     return empty;
   }
   if (!configureVapid(event)) {
@@ -75,14 +74,10 @@ export async function sendPushToPlayers(
 
   let subs: SubscriptionRow[];
   try {
-    const placeholders = names.map(() => "?").join(", ");
-    subs = await d1Query<SubscriptionRow>(
-      event,
-      `SELECT id, player_name, endpoint, p256dh, auth
-         FROM push_subscriptions
-        WHERE player_name IN (${placeholders})`,
-      names,
-    );
+    const rows = await fsQuery<SubscriptionRow>(event, "push_subscriptions", {
+      where: [{ field: "player_name", op: "IN", value: names }],
+    });
+    subs = rows.map((r) => r.fields);
   } catch (e) {
     console.error("[push] failed to load subscriptions:", e);
     return empty;
@@ -119,11 +114,7 @@ export async function sendPushToPlayers(
       );
       result.sent++;
       for (const name of players) reached.add(name);
-      await d1Execute(
-        event,
-        "UPDATE push_subscriptions SET last_success_at = ? WHERE endpoint = ?",
-        [Date.now(), sub.endpoint],
-      ).catch(() => {});
+      await updateEveryRowForEndpoint(event, sub.endpoint, { last_success_at: Date.now() }).catch(() => {});
     } catch (e: unknown) {
       const status = (e as { statusCode?: number })?.statusCode;
       // 404/410 mean the push service has permanently dropped this endpoint —
@@ -132,8 +123,8 @@ export async function sendPushToPlayers(
       // endpoints accumulate forever and every future send wastes a request.
       if (status === 404 || status === 410) {
         result.pruned++;
-        await d1Execute(event, "DELETE FROM push_subscriptions WHERE endpoint = ?", [
-          sub.endpoint,
+        await fsDeleteWhere(event, "push_subscriptions", [
+          { field: "endpoint", op: "EQUAL", value: sub.endpoint },
         ]).catch((err) => console.error("[push] failed to prune dead subscription:", err));
       } else {
         result.failed++;
@@ -152,17 +143,27 @@ export async function playersWithSubscriptions(
   event: H3Event,
   names: string[],
 ): Promise<Set<string>> {
-  if (names.length === 0 || !isD1Configured(event)) return new Set();
+  if (names.length === 0 || !isFirestoreConfigured(event)) return new Set();
   try {
-    const placeholders = names.map(() => "?").join(", ");
-    const rows = await d1Query<{ player_name: string }>(
-      event,
-      `SELECT DISTINCT player_name FROM push_subscriptions WHERE player_name IN (${placeholders})`,
-      names,
-    );
-    return new Set(rows.map((r) => r.player_name));
+    const rows = await fsQuery<{ player_name: string }>(event, "push_subscriptions", {
+      where: [{ field: "player_name", op: "IN", value: names }],
+    });
+    return new Set(rows.map((r) => r.fields.player_name));
   } catch (e) {
     console.error("[push] failed to check subscriptions:", e);
     return new Set();
   }
+}
+
+/** Applies `fields` to every subscription row sharing this endpoint — an
+ *  endpoint can serve several players, each with their own row. */
+async function updateEveryRowForEndpoint(
+  event: H3Event,
+  endpoint: string,
+  fields: Record<string, string | number | boolean | null>,
+): Promise<void> {
+  const rows = await fsQuery(event, "push_subscriptions", {
+    where: [{ field: "endpoint", op: "EQUAL", value: endpoint }],
+  });
+  await Promise.all(rows.map((r) => fsPatch(event, "push_subscriptions", r.id, fields)));
 }
