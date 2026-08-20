@@ -4,6 +4,7 @@ import { loadAllBalances } from "#server/utils/load-debts";
 import { renderRecapEmail } from "#server/utils/email-template";
 import { sendHtmlEmail } from "#server/utils/mailer";
 import { requireAdmin } from "#server/utils/require-admin";
+import { sendPushToPlayers } from "#server/utils/push";
 
 interface SendSummaryBody {
   names?: string[];
@@ -184,6 +185,27 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  // Fourth side effect: nudge the recipients on their phone. Purely additive —
+  // the e-mail is the record, this is just a chance they'll actually read it.
+  // Non-fatal, surfaced via pushError the same way envoisError is.
+  let pushSentCount = 0;
+  let pushError: string | null = null;
+  const emailedNames = results.filter((r) => r.status === "sent").map((r) => r.name);
+  if (emailedNames.length > 0) {
+    try {
+      const pushResult = await sendPushToPlayers(event, emailedNames, {
+        title: "Dettes - Augny Badminton",
+        body: "Ton récap de dettes vient d'être envoyé par e-mail. Ouvre ton espace adhérent ou tes emails pour le détail.",
+        url: "/mon-compte",
+        tag: "augny-recap",
+      });
+      pushSentCount = pushResult.sent;
+    } catch (e) {
+      pushError = e instanceof Error ? e.message : "Unknown error";
+      console.error("Failed to send push notifications:", e);
+    }
+  }
+
   return {
     results,
     sentCount,
@@ -191,5 +213,7 @@ export default defineEventHandler(async (event) => {
     errorCount: results.filter((r) => r.status === "error").length,
     newCutoffDate: newCutoff,
     envoisError,
+    pushSentCount,
+    pushError,
   };
 });

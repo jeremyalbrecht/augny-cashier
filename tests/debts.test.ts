@@ -387,6 +387,47 @@ describe("computeBalances with cutoff", () => {
     expect(alice.total).toBe(20);
   });
 
+  it("keeps every payment in allPayments, regardless of cutoff", () => {
+    // allPayments is the list counterpart of paymentsTotalAll. The member page
+    // pairs it with `invoices` (also unfiltered) to render a prior-period
+    // ledger; using the cutoff-filtered `payments` there would hide older
+    // payments and the displayed lines wouldn't sum to the displayed total.
+    const paiements: PaiementRow[] = [
+      { Nom: "ALICE Test", Montant: "50,00 €", Date: "01/01/2026" }, // before cutoff
+      { Nom: "ALICE Test", Montant: "30,00 €", Date: "15/05/2026" }, // after cutoff
+    ];
+    const result = computeBalances({
+      ...baseInput,
+      dettes: [],
+      tournois: [],
+      paiements,
+      cutoffDate: new Date(2026, 3, 1),
+    });
+    const alice = result.find((p) => p.name === "ALICE Test")!;
+
+    expect(alice.allPayments).toHaveLength(2);
+    expect(alice.allPayments.map((p) => p.amount)).toEqual([50, 30]);
+    // Sums to paymentsTotalAll — that identity is what makes the ledger balance.
+    expect(alice.allPayments.reduce((s, p) => s + p.amount, 0)).toBe(alice.paymentsTotalAll);
+    // And is strictly a superset of the cutoff-filtered list.
+    expect(alice.payments).toHaveLength(1);
+  });
+
+  it("allPayments equals payments when there is no cutoff", () => {
+    const paiements: PaiementRow[] = [
+      { Nom: "ALICE Test", Montant: "50,00 €", Date: "01/01/2026" },
+    ];
+    const result = computeBalances({
+      ...baseInput,
+      dettes: [],
+      tournois: [],
+      paiements,
+      cutoffDate: null,
+    });
+    const alice = result.find((p) => p.name === "ALICE Test")!;
+    expect(alice.allPayments).toEqual(alice.payments);
+  });
+
   it("filters tournaments with parseable dates by cutoff", () => {
     const tournois: TournoiRow[] = [
       { Licence: "11111111", Tournoi: "Old", Date: "Le 1 mars 2026",

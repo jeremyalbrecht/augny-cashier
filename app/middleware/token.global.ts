@@ -1,6 +1,14 @@
-// Routes that use Google OAuth instead of the shared X-Token (cashier secret).
-// Listed by prefix so future admin sub-pages are also exempt without edits.
-const OAUTH_ROUTE_PREFIXES = ['/dettes', '/auth/'];
+// Routes that authenticate some other way than the shared X-Token (the cashier
+// tablet secret): the treasurer dashboard and the member area both use a
+// session cookie (Google OAuth or magic link). Listed by prefix so future
+// sub-pages are exempt without edits.
+//
+// "/" itself is deliberately NOT exempt here — on the main domain it's the
+// token-gated cashier page. On the member subdomain it's redirected to
+// /mon-compte by member-host.global.ts, which (by filename, alphabetically)
+// runs before this one, so this middleware never actually sees "/" from that
+// host.
+const NON_TOKEN_ROUTE_PREFIXES = ['/dettes', '/auth/', '/mon-compte', '/connexion'];
 
 export default defineNuxtRouteMiddleware((to, from) => {
     // Skip during SSR / static prerender. Without this, building the index
@@ -8,7 +16,7 @@ export default defineNuxtRouteMiddleware((to, from) => {
     // generated output would be missing index.html — host serves 404 at /.
     if (import.meta.server) return;
 
-    if (OAUTH_ROUTE_PREFIXES.some((p) => to.path.startsWith(p))) {
+    if (NON_TOKEN_ROUTE_PREFIXES.some((p) => to.path.startsWith(p))) {
         return;
     }
     const token = useCookie('token', {maxAge: 60 * 60 * 24 * 365});

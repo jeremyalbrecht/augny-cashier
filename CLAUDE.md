@@ -3,9 +3,10 @@
 Nuxt 4 app for Augny Badminton's club finances:
 
 - **Cashier** (`/`) — gym-tablet UI to register member purchases (shuttle boxes, merch, tournament fees).
-- **Admin dashboard** (`/dettes`) — treasurer view: balances, payments, quarterly recap e-mails.
+- **Admin dashboard** (`/dettes`) — treasurer view: balances, payments, quarterly recap e-mails, payment reminders.
+- **Espace adhérent** (`/mon-compte`, `/connexion`) — a member's own view of their balance, tournaments and past recaps, plus web-push reminders. Served at `compte.augny-badminton.fr`.
 
-Single source of truth: Google Sheet **"Dettes adhérents 25/26"** (accessed via service account).
+Business data lives in the Google Sheet **"Dettes adhérents 25/26"** (accessed via service account). Machine-generated auth state (magic codes, push subscriptions, reminder log) lives in **Google Cloud Firestore** — see "Storage split" below.
 
 ## Commands
 
@@ -18,21 +19,98 @@ npm run test:watch
 
 There is no separate typecheck script; `npx nuxt typecheck` works. Project-wide `process`/`fs`/`path` errors are pre-existing (no `@types/node` configured) — ignore them unless you're adding `@types/node`.
 
-## Two-tier auth model
+## Three-tier auth model
 
-The most non-obvious thing about the codebase. Two completely separate auth mechanisms coexist:
+The most non-obvious thing about the codebase. Three completely separate auth mechanisms coexist:
 
 | Tier | Used by | How | Source of truth |
 |---|---|---|---|
 | Shared X-Token | Cashier (`/`, `/api/players`, `/api/prices`, `/api/push`, `/api/balance/[name]`, `/api/comitee`) | `X-Token` header or `?token=` query → cookie. Same token for everyone on the gym tablet. | `server/middleware/auth.ts` enforces. `runtimeConfig.token` = expected value. |
-| Google OAuth + allowlist | Admin (`/dettes`, `/api/debts*`, `/api/payments`, `/api/send-summary*`) | Sign-in via `/auth/google`, session cookie. Email must appear in the `Comité` sheet's column A. | `requireAdmin()` in `server/utils/require-admin.ts` (60s in-memory cache of the allowlist). |
+| Google OAuth + allowlist | Admin (`/dettes`, `/api/debts*`, `/api/payments`, `/api/send-summary*`, `/api/relances`) | Sign-in via `/auth/google`, session cookie. Email must appear in the `Comité` sheet's column A. | `requireAdmin()` in `server/utils/require-admin.ts` (60s in-memory cache of the allowlist). |
+| Google OAuth **or** magic link + roster | Member (`/mon-compte`, `/api/member/*`) | Google sign-in, or a 6-digit code / one-tap link e-mailed via `/api/member/magic/*`. Email must match a `Joueurs` **Email** cell. | `requireMember()` in `server/utils/require-member.ts` (60s roster cache). Identifier resolution in `server/utils/roster.ts`. |
 
 **To add a new endpoint, decide which tier it belongs to**:
 
-- Admin → put its path prefix in `ADMIN_PATH_PREFIXES` in `server/middleware/auth.ts` (carves it out of X-Token), then call `await requireAdmin(event)` at the top of the handler.
-- Cashier → don't touch the middleware (X-Token applies by default), don't call `requireAdmin`.
+- Admin → put its path prefix in `SELF_AUTH_PATH_PREFIXES` in `server/middleware/auth.ts` (carves it out of X-Token), then call `await requireAdmin(event)` at the top of the handler.
+- Member → same carve-out (`/api/member` is already covered), then `await requireMember(event)`.
+- Cashier → don't touch the middleware (X-Token applies by default), don't call either guard.
 
-The frontend has a matching client-side carve-out in `app/middleware/token.global.ts` (`OAUTH_ROUTE_PREFIXES`) so `/dettes` doesn't require a token cookie.
+The frontend has a matching client-side carve-out in `app/middleware/token.global.ts` (`NON_TOKEN_ROUTE_PREFIXES`) so `/dettes`, `/mon-compte` and `/connexion` don't require a token cookie.
+
+### Member auth: the two rules that are easy to break
+
+**1. Sign-in is never gated on roster membership.** Any Google account may complete OAuth — `server/routes/auth/google.get.ts` deliberately does not check anything. `/api/member/me` returns `{ recognised: false }` for an unknown email and the page shows "contacte le comité". Telling a *signed-in* user their own address isn't on the roster leaks nothing, because they proved they own that mailbox.
+
+**2. The magic-link endpoints must stay indistinguishable.** `POST /api/member/magic/request` returns the identical `{ ok: true }` for a match, a non-match, a match with no e-mail on file, and a rate-limit hit; `verify` returns one generic 400 for every failure. The form accepts **e-mail or licence number**, and licence numbers are low-entropy and semi-public — any observable difference turns this into a roster-scraping oracle. Correspondingly, the e-mail is **always sent to the address stored on the roster**, never to user input, or guessing a licence would let someone redirect another member's login.
+
+Rate limiting keys on a hash of the raw input (`magic_requests`), not the resolved player, so probing licence numbers that match nobody still costs quota.
+
+### An e-mail is an account, not a person
+
+Several players share one address — a parent registers themselves and their children under it. In the live roster: **90 players, 82 distinct addresses, 7 shared** (one covering three players).
+
+So `findPlayersByEmail()` (plural) is the correct lookup everywhere balances or notifications are involved; `findPlayerByEmail()` returns only the first and exists for places needing any single name (magic-link greeting, session display name). `requireMember()` returns `{ email, players[], names[], primaryName }` — iterate `players`, or children silently vanish.
+
+**Roster order does not identify the account holder** — one shared address in the live sheet lists the child first. `/mon-compte` therefore labels a household by its e-mail, never by a name.
+
+Push subscriptions are stored **one row per (player, device)**, so `UNIQUE(player_name, endpoint)` rather than on endpoint alone: a reminder aimed at a child must reach the parent's phone, the only device there is. `sendPushToPlayers` de-duplicates by endpoint so a household owing for two players still gets one notification, and prunes dead endpoints across every player they served.
+
+`/mon-compte` renders one card per player. A player whose total is within ±0.01 collapses to a single "rien à régler" line — their existence is confirmed, but a breakdown of zeros is noise. A player in **credit** (negative total) still gets full detail.
+
+### Debug impersonation (dev only)
+
+```bash
+NUXT_PUBLIC_DEBUG_AUTH=true npm run dev
+```
+
+Adds a purple box on `/connexion` that signs you in as **any** e-mail with no verification, via `POST /api/member/debug-login`. Pass an address that isn't on the roster to exercise the "adresse non reconnue" screen.
+
+Two things worth knowing:
+
+- **It also grants admin.** `requireAdmin` only checks the `Comité` sheet, so impersonating a committee address gives a working `/api/debts` session. That's the fastest way to get the full admin dataset for cross-checking member pages.
+- **Verify UI features through the UI.** The endpoint working proves nothing about the page: this feature shipped once with a working endpoint and an invisible form, because the env var enabled only the server half.
+
+It's `NUXT_PUBLIC_*` because both the browser (to render the form) and the server (to accept the request) read the same key — a server-only variable would enable half the feature and look broken. Publishing the flag costs nothing: **both sides also require `import.meta.dev`**, which is a compile-time constant, so `nuxt build` reduces the handler to an unconditional `throw 404` with `setUserSession` stripped out entirely. Setting the variable in Azure does nothing.
+
+## Storage split
+
+Google Sheets stays the human-editable business ledger. Cloudflare **used to** hold machine-generated throwaway state in D1; that moved to **Google Cloud Firestore** (Native mode) because a Cloudflare API token has no way to scope below "every D1 database in the account," while Firestore reuses the SAME service account already scoped to just this app's Sheets (`NUXT_SA`) — no separate broad-scope credential to protect.
+
+| Data | Where | Why |
+|---|---|---|
+| Joueurs, Tarifs, Dettes, Tournois, Paiements, Envois, Data | Google Sheets | The treasurer edits these by hand. |
+| `magic_codes`, `magic_requests`, `push_subscriptions`, `reminders_sent` | Firestore (Native mode) | Needs expiry and atomic consume; never human-edited. |
+| Sessions | **Nowhere** | `nuxt-auth-utils` sessions are sealed cookies. "Stay logged in" is `runtimeConfig.session.maxAge` (60 days), not a table. |
+
+The app runs on Azure Static Web Apps, so Firestore is reached over its REST API via `server/utils/firestore.ts` (using `NUXT_SA`'s access token, scope `https://www.googleapis.com/auth/datastore`), not the `@google-cloud/firestore` SDK. The ~100-200 ms round-trip is fine because nothing here is hot: magic codes are verified about once a month per member, and subscriptions are read only when sending pushes.
+
+Free-tier Firestore does **not** support TTL-based auto-deletion (that needs billing enabled) — not a regression versus D1, which never had server-side TTL either. Expiry is enforced in application code (`magic-code.ts`'s `checkConsumable`), and cleanup is best-effort delete-on-write in `request.post.ts`'s `pruneExpired`. Single-use consumption (`magic_codes.used_at`) is race-free via Firestore's `currentDocument.updateTime` precondition — a compare-and-swap, the equivalent of D1's `WHERE used_at IS NULL` guard.
+
+`reminders_sent` deliberately does **not** live in the `Envois` sheet: that sheet is the invoice ledger read by the FIFO unpaid-invoice walk in `debts.ts`, and reminder rows there would be counted as invoices and corrupt every balance.
+
+Infrastructure is Terraform in `infra/` (Cloudflare provider v5 for the `compte.<domain>` DNS record, plus the Google provider for Firestore). `infra/firestore.tf` creates the database, enables the API, grants the app's existing service account `roles/datastore.user`, and declares the composite indexes the app's queries need (Firestore doesn't auto-build an index for an equality filter combined with an order/range on a different field). That IAM grant is project-wide — Google has no finer "this database only" scope either — acceptable because the GCP project is dedicated to this app.
+
+The `compte.<domain>` root sends visitors to `/mon-compte` instead of the cashier page, via `app/middleware/member-host.global.ts` — a **client-side** redirect, deliberately not a Cloudflare Transform Rule (there used to be one, `infra/rewrite.tf`) or a Nitro server middleware. Neither of those can work here: the app is `ssr: false`, so every response is an identical empty shell (`window.__NUXT__ = {}`, no rendered content or route info) — Vue Router's initial route comes entirely from the browser's own `window.location`, which a server- or edge-side path rewrite changes for the *origin* but not for the browser, so it has zero effect on which page mounts. Only code that runs in the browser can pick a different route. The Cloudflare Transform Rule was also independently broken on its own terms: Azure's CNAME-based custom-domain validation needs the DNS record to resolve literally to the SWA hostname, which a Cloudflare-proxied record doesn't do — proxying and a validated custom domain are mutually exclusive on the free plan, and the rewrite only ever ran on proxied traffic. DNS (`infra/dns.tf`) is now a plain, unproxied CNAME.
+
+`member-host.global.ts` must alphabetically sort before `token.global.ts` (both are global middleware, and Nuxt runs them in filename order) — it redirects `/` on the member host to `/mon-compte` before the token middleware gets a chance to 401 the unauthenticated root path.
+
+## Web push
+
+`server/utils/push.ts` sends via `web-push`; `public/sw.js` is a hand-written service worker (no `@vite-pwa/nuxt` — the app is `ssr: false` and a precache would be actively harmful for a page whose job is showing a current balance).
+
+**Reach is the thing to remember: there is no e-mail fallback.**
+
+| Platform | Works? | Requires |
+|---|---|---|
+| Android (Chrome/Firefox/Edge), all desktop | ✅ | Just the permission prompt — no install. The primary path. |
+| iOS/iPadOS Safari 16.4+ | ⚠️ | Must be added to the Home Screen first; `Notification.requestPermission` doesn't exist until then. |
+| Chrome/Firefox on iOS | ❌ | Never — Safari underneath, no push API. |
+
+So a member without a `push_subscriptions` row gets **nothing**. `sendPushToPlayers` returns `noSubscription` and the `/dettes` Relances modal must show it, or the UI will overstate reach. `app/composables/usePushNotifications.ts` distinguishes `needs-install` / `unsupported-ios` / `unsupported` / `denied` so the member page never renders a dead toggle.
+
+Dead endpoints (404/410) are deleted on send — otherwise they accumulate forever.
+
+`/auth/magic` has a 5-minute `REUSE_GRACE_MS` window: mail scanners (Outlook SafeLinks, antivirus gateways) prefetch links, and strict single-use would burn the token before the member ever taps it. The typed-code path stays strictly single-use.
 
 ## Where the business rules live
 
@@ -52,9 +130,11 @@ The frontend has a matching client-side carve-out in `app/middleware/token.globa
 
 Six worksheets, all read via `server/utils/load-debts.ts`:
 
+⚠️ **Verified against the live sheet (Aug 2026)** — the real `Joueurs` column order is **A: Nom, B: Licence, C: Date de naissance, D: Email**, not what older notes claimed. It doesn't matter to most code (`getSheetData` maps by header name, so order is irrelevant), but it does matter to anything using a bounded range: **`/api/players` reads `Joueurs!A1:C100` and therefore cannot see the Email column at all.** `load-debts.ts` and `require-member.ts` read `A1:Z1000` and see everything.
+
 | Sheet | Columns | Notes |
 |---|---|---|
-| `Joueurs` | Nom, Email, Licence (+ Enfant in the legacy Python) | Player roster. |
+| `Joueurs` | Nom, Licence, Date de naissance, Email (+ Enfant in the legacy Python) | Player roster. 90 rows, all with an e-mail; 82 distinct addresses. |
 | `Tarifs` | Item, Catégorie, Prix | Catalog used by the cashier and to categorize Dettes rows. |
 | `Dettes` | Nom, Item, Prix, Date | Append-only purchase log (the cashier writes here via `/api/push`). Negative prices = refunds. |
 | `Tournois N` | Licence, Tournoi, Date, Lieu, Vainqueur, Finaliste, Montant dû, Paiement joueur | Tournament participation. Date column is French verbose, parsed by `parseSheetDate`. |
@@ -65,6 +145,18 @@ Six worksheets, all read via `server/utils/load-debts.ts`:
 | `Data` | A: label, B: value | Config sheet. Row whose A column contains "dernier envoi" → B column holds the cutoff date as `DD/MM/YYYY`. **Lookup is by label substring, not by fixed cell** — rows can be rearranged. |
 
 Sheet names with spaces in A1 notation must be wrapped in single quotes inside the range string (`'Tournois N'!A1:Z2000`). The fetch helper assumes row 1 = headers (`server/utils/fetch.ts`).
+
+Money is **not** consistently formatted in the sheet — `Envois` has `112,00 €` while `Paiements` has `343,00€` (no space). `parseEuro` copes with both; don't "tidy" it into a stricter parser.
+
+## ⚠️ Read-volume limit (unresolved — matters before launching /mon-compte)
+
+**Every call to `/api/member/me` runs `loadAllBalances()`, which is 8 Google Sheets reads.** There is no caching layer: the only caches in the codebase are the 60 s allowlist/roster caches in `require-admin.ts` / `require-member.ts`, and neither covers the balance data.
+
+The Sheets API allows ~60 read requests/minute. So roughly **7 member page-loads per minute saturates the quota**, and further requests get HTTP 429 and the page errors.
+
+This was hit for real while testing: a script walking 82 addresses produced **368 rate-limit errors**, and the failures looked exactly like application bugs (`recognised: undefined`, empty player lists) until the server log was checked. If member pages start failing in clusters, **check for 429 before debugging the logic**.
+
+It hasn't mattered so far because `/dettes` has ~5 users. It will matter the moment 90 members get a recap e-mail linking them to `/mon-compte`. Options if/when it bites: cache `loadAllBalances` server-side for a minute or two (balances change rarely — the cashier appends a row, and members tolerate a short lag), or have `/api/member/me` fetch only the rows for the caller.
 
 ## Side effects of the send-recap endpoint
 
@@ -81,20 +173,31 @@ A partial failure here is recoverable: if writes 2 or 3 fail, you can manually a
 `runtimeConfig` keys (see `nuxt.config.ts`) → env vars:
 
 - `NUXT_TOKEN` — shared cashier secret (`token`)
-- `NUXT_SA` — base64-encoded service-account JSON (`sa`)
+- `NUXT_SA` — base64-encoded service-account JSON (`sa`). Used for both Sheets **and Firestore** — the same service account needs `roles/datastore.user` on the GCP project (granted by `infra/firestore.tf`) in addition to whatever gives it Sheets access.
 - `NUXT_SESSION_PASSWORD` — `nuxt-auth-utils` session cookie key (32+ chars; `openssl rand -hex 32`)
 - `NUXT_OAUTH_GOOGLE_CLIENT_ID` / `NUXT_OAUTH_GOOGLE_CLIENT_SECRET` — Google OAuth web client; redirect URI is `<origin>/auth/google`
 - `NUXT_SMTP_USER` / `NUXT_SMTP_PASSWORD` — Gmail app password
 - `GOOGLE_SHEET_ID` — spreadsheet ID (plain env, not runtimeConfig)
+- `NUXT_VAPID_PUBLIC_KEY` / `NUXT_VAPID_PRIVATE_KEY` / `NUXT_VAPID_SUBJECT` — web push (`vapid.*`); generate with `npx web-push generate-vapid-keys`
+- `NUXT_PUBLIC_VAPID_PUBLIC_KEY` — same public key, exposed to the browser so it can subscribe
+
+Note: the GitHub Actions workflow only passes `GOOGLE_SHEET_ID`, `NUXT_SA` and `NUXT_TOKEN`. Everything else (OAuth, session password, SMTP, VAPID) lives in the **Azure Portal app settings** — add new secrets there, not to the workflow.
 
 ## Tests
 
-Run with `npm test`. Two suites:
+Run with `npm test`. Five suites:
 
 - `tests/debts.test.ts` — date parsing, euro parsing, every-5th-free, cutoff filtering, FIFO invoice matching.
 - `tests/email-template.test.ts` — template rendering, escaping, highlights.
+- `tests/roster.test.ts` — email/licence identifier resolution, normalisation, players with no email on file.
+- `tests/magic-code.test.ts` — expiry boundary, single-use, attempt lockout, rate-limit window.
+- `tests/reminders.test.ts` — the 14-day threshold, 7-day cooldown, unparseable dates.
 
-New behaviour in `debts.ts` or `email-template.ts` should add tests — those modules are pure and easy to cover. Existing tests assert specific HTML fragments (`<b>RSL</b> (...) → ...`); if you change the email template's textual content, update tests in the same diff.
+New behaviour in the pure modules (`debts.ts`, `email-template.ts`, `roster.ts`, `magic-code.ts`, `reminders.ts`) should add tests — they take plain data and are easy to cover. Existing tests assert specific HTML fragments (`<b>RSL</b> (...) → ...`); if you change the email template's textual content, update tests in the same diff.
+
+`vitest.config.ts` maps the `#server/*` alias so tests can import server utils. Without it, *value* imports through the alias fail to resolve (type-only imports happen to work because they're erased).
+
+**`npx nuxt typecheck` is currently broken** in this repo — `vue-tsc` can't resolve `tsc` (`ERR_PACKAGE_PATH_NOT_EXPORTED`). Use `npm run build` as the type/import gate instead.
 
 ## Module augmentation
 

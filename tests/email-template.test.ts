@@ -267,4 +267,5 @@ describe("renderRecapEmail — performance highlight", () => {
     }));
     expect(html).toMatch(/Bravo pour ta victoire à &lt;script&gt;x&lt;\/script&gt;/);
   });
+
 });

@@ -143,24 +143,8 @@ const fetchBalance = async () => {
   }
 }
 
-const balanceClass = computed(() => {
-  if (balance.value == null) return ''
-  if (balance.value > 0.01) return 'text-red-600 dark:text-red-400'
-  if (balance.value < -0.01) return 'text-green-600 dark:text-green-400'
-  return 'text-gray-500'
-})
-
-const balanceLabel = computed(() => {
-  if (balance.value == null) return ''
-  if (balance.value > 0.01) return 'doit'
-  if (balance.value < -0.01) return 'crédit'
-  return 'à jour'
-})
-
-const Euro = new Intl.NumberFormat('fr-FR', {
-  style: 'currency',
-  currency: 'EUR',
-});
+// Euro, balanceClass and balanceLabel are auto-imported from
+// app/composables/useFormat.ts and called with `balance` in the template.
 
 const deselectPlayer = () => {
   player.value = ''
@@ -245,9 +229,9 @@ const submit = async () => {
           <span class="text-gray-500 dark:text-gray-400">Solde actuel</span>
           <span v-if="balanceLoading" class="text-gray-400">…</span>
           <span v-else-if="balanceError" class="text-gray-400 text-xs">indisponible</span>
-          <span v-else-if="balance != null" :class="balanceClass" class="font-semibold tabular-nums">
+          <span v-else-if="balance != null" :class="balanceClass(balance)" class="font-semibold tabular-nums">
             {{ Euro.format(balance) }}
-            <span class="text-xs font-normal ml-1 opacity-70">({{ balanceLabel }})</span>
+            <span class="text-xs font-normal ml-1 opacity-70">({{ balanceLabel(balance) }})</span>
           </span>
         </div>
       </template>

@@ -114,11 +114,25 @@ export interface PlayerBalance {
   lines: DebtLine[];
   tournaments: TournamentLine[];
   payments: PaymentLine[];
+  /** Every Dettes row for this player, regardless of cutoff — the list
+   *  counterpart of `lines`, same relationship as `allPayments` to `payments`.
+   *  Powers the member page's full-season history view. */
+  allLines: DebtLine[];
+  /** Every tournament for this player, regardless of cutoff (but still after
+   *  the every-5th-free discount, so `offered` is correct). The list
+   *  counterpart of `tournaments`. */
+  allTournaments: TournamentLine[];
   // --- Invoice tracking (unfiltered) — drives "Non payés" + total Solde ---
   /** Total of all Envois rows for this player (every recap ever sent). */
   invoicesTotal: number;
   /** Total of ALL Paiements rows for this player, regardless of cutoff. */
   paymentsTotalAll: number;
+  /** Every Paiements row, unfiltered — the list counterpart of
+   *  `paymentsTotalAll`, just as `payments` is the counterpart of
+   *  `paymentsTotal`. Needed to render a prior-period ledger that actually
+   *  balances: `invoices` is unfiltered, so pairing it with the cutoff-filtered
+   *  `payments` would hide older payments and make the arithmetic look wrong. */
+  allPayments: PaymentLine[];
   /** max(invoicesTotal − paymentsTotalAll, 0). Running tally — payments
    *  naturally settle the oldest unpaid invoices first. */
   outstandingFromInvoices: number;
@@ -291,8 +305,11 @@ export function computeBalances(input: ComputeBalancesInput): PlayerBalance[] {
       lines: [],
       tournaments: [],
       payments: [],
+      allLines: [],
+      allTournaments: [],
       invoicesTotal: 0,
       paymentsTotalAll: 0,
+      allPayments: [],
       outstandingFromInvoices: 0,
       invoices: [],
       unpaidInvoiceCount: 0,
@@ -305,15 +322,17 @@ export function computeBalances(input: ComputeBalancesInput): PlayerBalance[] {
   for (const row of dettes) {
     const p = players.get(row.Nom);
     if (!p) continue; // debt row for an unknown player — skip silently for now
-    if (!afterCutoff(row.Date, cutoffDate, false)) continue;
     const price = parseEuro(row.Prix);
     if (Number.isNaN(price)) continue;
-    p.lines.push({
+    const line: DebtLine = {
       item: row.Item,
       category: categoryByItem.get(row.Item) ?? "Divers",
       price,
       date: row.Date,
-    });
+    };
+    p.allLines.push(line);
+    if (!afterCutoff(row.Date, cutoffDate, false)) continue;
+    p.lines.push(line);
     p.purchasesTotal += price;
   }
 
@@ -352,8 +371,15 @@ export function computeBalances(input: ComputeBalancesInput): PlayerBalance[] {
     if (!p) continue;
     const amount = parseEuro(row.Montant);
     if (Number.isNaN(amount)) continue;
-    // Unfiltered total — drives the running tally against Envois.
+    // Unfiltered total + list — drive the running tally against Envois and the
+    // member-facing prior-period ledger.
     p.paymentsTotalAll += amount;
+    p.allPayments.push({
+      amount,
+      date: row.Date,
+      method: row.Méthode,
+      note: row.Note,
+    });
     // Cutoff-filtered list + total — drives the current-period "Total dû".
     if (!afterCutoff(row.Date, cutoffDate, false)) continue;
     p.payments.push({
@@ -376,6 +402,10 @@ export function computeBalances(input: ComputeBalancesInput): PlayerBalance[] {
 
   for (const p of players.values()) {
     applyEveryFifthDiscount(p.tournaments);
+    // Snapshot the full season (discount already applied, so `offered` is
+    // correct) before the cutoff-filtered `tournaments` list below drops the
+    // older ones.
+    p.allTournaments = [...p.tournaments];
     // Drop pre-cutoff tournaments AFTER the discount has been assigned, so the
     // free slot stays "claimed" by the correct tournament in the full season.
     if (cutoffDate) {
