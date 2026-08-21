@@ -255,8 +255,12 @@ export interface MagicLinkEmailOptions {
 
 export function renderMagicLinkEmail(opts: MagicLinkEmailOptions): string {
   const { name, code, link, expiresInMinutes } = opts;
-  // Space the digits so they're readable at a glance and easy to copy.
-  const spacedCode = escapeHtml(code).split("").join(" ");
+  // Visual spacing only — via CSS `letter-spacing` below, not literal space
+  // characters. iOS Mail and Android Gmail both offer the code as a QuickType/
+  // autofill suggestion by scanning for a contiguous run of digits near a word
+  // like "code"; splitting it with real spaces ("1 2 3 4 5 6") breaks that
+  // detection even though it reads fine to a human.
+  const displayCode = escapeHtml(code);
 
   return `<!DOCTYPE html>
 <html lang="fr">
@@ -299,7 +303,7 @@ export function renderMagicLinkEmail(opts: MagicLinkEmailOptions): string {
                 Ton code
               </p>
               <p style="margin: 0; font-size: 34px; font-weight: 700; color: ${NAVY}; letter-spacing: 0.18em;">
-                ${spacedCode}
+                ${displayCode}
               </p>
             </td>
           </tr>

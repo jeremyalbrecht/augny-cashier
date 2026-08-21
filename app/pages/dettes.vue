@@ -378,7 +378,7 @@ async function openPreview(name: string) {
 
 <template>
   <div class="min-h-screen bg-gray-50 dark:bg-gray-950">
-    <header class="bg-[#0a1f44] text-white">
+    <header class="bg-[#0a1f44] text-white pt-[env(safe-area-inset-top)]">
       <div class="max-w-screen-xl mx-auto px-4 py-4 flex items-center justify-between">
         <div class="flex items-center gap-3">
           <img src="~/assets/images/logo.png" class="w-12 brightness-0 invert" alt="Augny Badminton" />
