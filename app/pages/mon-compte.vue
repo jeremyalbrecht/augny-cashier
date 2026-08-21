@@ -306,7 +306,7 @@ function hasDetail(p: PlayerBalance): boolean {
 
 <template>
   <div class="min-h-screen bg-gray-50 dark:bg-gray-950">
-    <header class="bg-[#0a1f44] text-white">
+    <header class="bg-[#0a1f44] text-white pt-[env(safe-area-inset-top)]">
       <div class="max-w-screen-sm mx-auto px-4 py-4 flex items-center justify-between gap-3">
         <div class="flex items-center gap-3 min-w-0">
           <img src="~/assets/images/logo.png" class="w-10 shrink-0 brightness-0 invert" alt="Augny Badminton" />

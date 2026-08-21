@@ -126,7 +126,9 @@ Dead endpoints (404/410) are deleted on send — otherwise they accumulate forev
 - **Invoice tracking**: `invoicesTotal − paymentsTotalAll` clamped at 0 = `outstandingFromInvoices`. `unpaidInvoiceCount` is a FIFO walk in chronological order — partial-coverage invoice counts as unpaid.
 - Unparseable tournament dates **are kept** (safer to over-bill than to silently drop) and flagged via `dateUnparseable`.
 
-**`server/utils/email-template.ts`** — pure HTML template for the quarterly recap. Highlights: tests assert specific strings (`Bonjour X`, `Nx <b>RSL</b> (...) → ...`), so don't reformat those lines without updating tests. Logo URL is hardcoded to the club's public site — note the build-hash in the path is brittle.
+**`server/utils/email-template.ts`** — pure HTML template for the quarterly recap. Highlights: tests assert specific strings (`Bonjour X`, `Nx <b>RSL</b> (...) → ...`), so don't reformat those lines without updating tests. Logo URL is hardcoded to the club's public site — note the build-hash in the path is brittle. The magic-link code is spaced visually via CSS `letter-spacing`, **not** literal space characters — iOS Mail and Android Gmail both offer the code as an autofill/QuickType suggestion by scanning for a contiguous digit run near the word "code", and `"1 2 3 4 5 6"` doesn't match that even though it reads fine to a human.
+
+**`server/utils/mailer.ts`** — sends via Gmail SMTP, then best-effort reaches back over IMAP (`imapflow`) to move that same message out of Sent and into Trash (Gmail auto-purges Trash after 30 days). Gmail's SMTP server files a copy into the sending account's own Sent folder itself — nothing in the SMTP conversation can prevent that — so this exists purely to keep that folder from silently accumulating every magic-link code and recap ever sent through this personal Gmail account. The Sent/Trash mailboxes are found by IMAP special-use flag (`\Sent`/`\Trash`), not a hardcoded name — this account's are French-localised (`[Gmail]/Messages envoyés`, `[Gmail]/Corbeille`). Never lets a failure here fail the send; the e-mail has already gone out by the time this runs.
 
 ## Sheet schema
 
