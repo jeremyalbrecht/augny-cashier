@@ -12,10 +12,8 @@
 
 import type { PlayerBalance } from "#server/utils/debts";
 
-const RIB_URL = "https://augny-badminton.s3.gra.io.cloud.ovh.net/RIB_Augny_Badminton_2e76e55642.pdf";
-// Logo hosted on the club's public website. URL has a build hash — if the
-// site is rebuilt this may rotate; update here if the image stops loading.
-const LOGO_URL = "https://www.augny-badminton.fr/_nuxt/logo.f3773237.png";
+const RIB_URL = "https://augny-badminton-website.s3.fr-par.scw.cloud/iban_CSJ_BADMINTON_00026740101_85f98240f9.pdf";
+const LOGO_URL = "https://augny-badminton-website.s3.fr-par.scw.cloud/logo_b4681117e2_f6210ec9a5.png";
 
 // Brand palette — matches the navy used in the /dettes admin UI and the
 // club's existing end-of-season e-mail (offered_tournaments.py).
